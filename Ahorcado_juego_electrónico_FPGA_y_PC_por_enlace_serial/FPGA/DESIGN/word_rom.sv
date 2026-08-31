@@ -23,7 +23,7 @@ module word_rom #(
     parameter int N_WORDS = 64,
     parameter int MAX_LEN = 12
 ) (
-    input  logic [5:0]              index_i,
+    input  logic [$clog2(N_WORDS)-1:0] index_i,
     output logic [8*MAX_LEN-1:0]    word_data_o,
     output logic [3:0]              word_len_o
 );
