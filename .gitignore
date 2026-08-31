@@ -1,0 +1,50 @@
+# ---------- Vivado ----------
+# El proyecto de Vivado es un artefacto generado: no se versiona.
+# Las fuentes viven en rtl/, tb/ y constraints/, y el proyecto se
+# reconstruye con scripts/create_project.tcl.
+vivado/
+*.xpr
+*.cache/
+*.hw/
+*.ip_user_files/
+*.runs/
+*.sim/
+*.gen/
+*.srcs/
+.Xil/
+
+# Reportes y salidas de herramienta
+*.jou
+*.log
+*.str
+*.wdb
+*.pb
+*.rpt
+*.dcp
+*.bit
+*.bin
+*.ltx
+*.mmi
+vivado*.backup.jou
+vivado*.backup.log
+webtalk*.jou
+webtalk*.log
+usage_statistics_webtalk*
+hs_err_pid*.log
+
+# Simulación
+xsim.dir/
+*.vcd
+*.wcfg
+*.wdb
+
+# ---------- Python ----------
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# ---------- Sistema ----------
+Thumbs.db
+desktop.ini
+.DS_Store
