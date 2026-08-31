@@ -32,7 +32,7 @@ top
 ├── lfsr                  generador de 8 bits
 ├── round_timer           cuenta regresiva
 ├── lcd_screen_ctrl  →  lcd_peripheral  →  lcd_controller  →  PmodCLP
-├── uart_msg_tx      →  uart_peripheral →  uart_core       →  PC
+├── uart_msg         →  uart_peripheral →  uart_core       →  PC
 ├── uart_test_block       pruebas del UART, se activa por parámetro
 ├── display_controller
 ├── buzzer_controller
@@ -45,14 +45,22 @@ Notificar una letra por UART son unos 34 bytes, cada uno esperando a que `send`
 vuelva a cero. Si eso lo hiciera el `game_controller`, la FSM pasaría de 7
 estados a varias decenas y mezclaría las reglas del juego con el armado de texto.
 
-Con `lcd_screen_ctrl` y `uart_msg_tx` aparte, el `game_controller` solo conoce
+Con `lcd_screen_ctrl` y `uart_msg` aparte, el `game_controller` solo conoce
 reglas: recibe una letra, decide qué pasa, y dispara un evento. Cada capa se
 prueba por separado.
 
 `lcd_screen_ctrl` recibe qué pantalla mostrar más los datos del juego (palabra,
-patrón revelado, errores, modo, victorias) y devuelve `busy`. `uart_msg_tx`
+patrón revelado, errores, modo, victorias) y devuelve `busy`. `uart_msg`
 recibe un evento —inicio, letra, repetida, fin— y los mismos datos, y arma la
 trama.
+
+**Cada periférico tiene un solo maestro**, que es su capa de presentación. Por
+eso `uart_msg` también se encarga de la recepción: leer la letra del jugador
+obliga a sondear `new_rx`, leer el registro RX y escribir el bit que lo limpia,
+todo sobre el mismo bus por el que salen las tramas. Si el `game_controller`
+leyera por su cuenta habría dos módulos manejando el mismo periférico, con una
+trama saliendo y una letra entrando a la vez. El `game_controller` no toca
+ningún bus: pide pantallas y eventos, y recibe letras ya validadas.
 
 ---
 
@@ -202,10 +210,19 @@ fácil:    rom_index = lfsr_capturado[5:0]     →  0 .. 63
 Un ciclo, sin módulo, sin rechazo, sin bucles. En modo difícil no puede salir
 una palabra corta porque en el rango 0–31 no hay ninguna.
 
-Queda un sesgo mínimo: como el estado `8'h00` no existe, el patrón `000000` en
-los seis bits bajos aparece 3 veces por ciclo y los otros 63 aparecen 4. Son
-cuatro décimas de punto porcentual. Lo mencionamos en el informe en vez de
-esconderlo.
+Queda un sesgo, y conviene decirlo con los números correctos. Como el estado
+`8'h00` no existe, el índice 0 sale menos veces que los demás a lo largo del
+ciclo de 255 estados:
+
+| Modo | Índice 0 | Los demás | Desviación del índice 0 |
+|---|---:|---:|---:|
+| Difícil | 7 de 255 | 8 de 255 | −12 % |
+| Fácil | 3 de 255 | 4 de 255 | −25 % |
+
+En la práctica significa que la primera palabra del banco aparece algo menos que
+las otras: un 1,18 % de las partidas en modo fácil en vez del 1,56 % que
+correspondería. No afecta al juego, pero decir "un 0,4 % de sesgo" sería
+inexacto: ese 0,4 % es la desviación de los otros 63 índices, no la del 0.
 
 El testbench comprueba que el LFSR recorra 255 estados distintos, que nunca pase
 por cero y que los 255 den una palabra de 6 letras o más en modo difícil.
@@ -215,12 +232,38 @@ por cero y que los 255 den una palabra de 6 letras o más en modo difícil.
 ## 8. Reglas de la partida
 
 ```
-MODE_SELECT ─BTN_OK→ START_GAME → PLAYING → WIN / LOSE_ERROR / LOSE_TIMEOUT
-                                                      ↓
-                                    MODE_SELECT ← RESULT (3 s)
+DIBUJA_SEL → SELECCION ─BTN_OK→ CARGA → INICIO → ESPERA_INICIO
+                  ↑                                     ↓
+                  │                                  JUGANDO ⇄ EVALUA
+                  │                                     │        ↓
+                  │                                     │     PUBLICA
+                  │                                     │        ↓
+                  │                                     └─ ESPERA_JUGADA
+                  │                                              ↓
+            RESULTADO ← ESPERA_FIN ← FIN ← desenlace ← ───────────┘
+              (3 s)                          WIN / LER / LTO
 ```
 
-Puede haber estados de espera mientras la capa de presentación está ocupada.
+`BTN_SEL` en `SELECCION` cambia el modo y vuelve a `DIBUJA_SEL`.
+
+Los estados de espera están porque las dos capas de presentación tardan
+milisegundos: no se puede pedir nada nuevo mientras alguna sigue ocupada.
+
+**Un solo estado de fin, no tres.** Ganar, perder por fallos y perder por tiempo
+hacen lo mismo: pintar, notificar, sonar y esperar. Lo único que cambia es un
+código de dos bits, y ese código es justo lo que las dos capas reciben como
+entrada. Tres estados que solo se diferencian en un dato pertenecen al camino de
+datos, no al control. La diferencia sigue viéndose donde importa: el LCD muestra
+`GANASTE`, `PERDISTE: FALLOS` o `PERDISTE: TIEMPO`, la PC recibe `WIN`, `LER` o
+`LTO`, y el sonido de victoria no es el de derrota.
+
+**`CARGA` va aparte de `INICIO`** porque las capas copian los datos en el mismo
+flanco en que aceptan la orden. Registrar la palabra y disparar el dibujo en el
+mismo estado haría que copiaran los valores viejos.
+
+**El temporizador no se detiene mientras se publica.** Notificar una jugada tarda
+unos milisegundos; pararlo en cada letra le regalaría tiempo al jugador y el
+límite dejaría de ser el que dice el modo.
 
 **Letras usadas:** bitmask de 26 bits, `índice = byte - 8'h41`. Si el bit ya está
 puesto, la letra es repetida: no consume intento, no toca errores, no reinicia el
@@ -400,7 +443,7 @@ rx_data_i[7:0], rx_valid_i
 
 y toda la dependencia queda en una capa de adaptación dentro del periférico. Si
 el núcleo real es distinto, solo se toca esa capa: los registros, la semántica de
-`send` y `new_rx`, `uart_msg_tx` y el `game_controller` no se enteran.
+`send` y `new_rx`, `uart_msg` y el `game_controller` no se enteran.
 
 Para verificar mientras tanto usamos un modelo de comportamiento del núcleo y un
 modelo de línea serie a 115200 que permite comprobar la trama bit a bit. Cuando
@@ -425,6 +468,13 @@ Texto ASCII terminado en salto de línea, con campos de ancho fijo.
 
 **De la PC a la FPGA:** un byte, de la `A` a la `Z`. Cualquier otra cosa se
 descarta. Python valida antes de mandar, y la FPGA valida igual.
+
+Ese filtro vive en `uart_msg`, no en el `game_controller`: descartar un byte que
+no es una letra es cuestión de protocolo, no una regla del juego. El aviso de
+byte recibido se limpia siempre, sea la letra válida o no. Eso resuelve además lo
+que pide el enunciado sobre las letras que llegan en la pantalla de selección o
+mostrando el resultado: se ignoran, pero el aviso queda limpio y no se cuela como
+primera letra de la partida siguiente.
 
 **De la FPGA a la PC:**
 
@@ -512,13 +562,29 @@ Si en el aula no se oye, quedan libres JB7–JB10 para un Pmod buzzer.
 
 ## 13. Aplicación de PC
 
-Pide una letra, valida que sea un solo carácter alfabético, la pasa a mayúscula y
-la manda como un byte. Parsea los mensajes, muestra el patrón, los intentos que
-quedan, cómo fue la última letra y el resultado final. No se cae con entradas
-raras.
+`PYTHON/DESIGN/ahorcado_terminal.py`. Pide una letra, valida que sea un solo
+carácter de la A a la Z, la pasa a mayúscula y la manda como un byte. Trocea los
+mensajes por posición —para eso son de ancho fijo— y muestra el patrón, los
+intentos que quedan, cómo fue la última letra y el resultado final. Una línea que
+no encaje se reporta y se descarta, sin detener nada.
 
 No guarda la palabra secreta, no elige la palabra, no decide quién gana y no
 lleva el tiempo. Todo eso está en la FPGA.
+
+**Por qué hay un hilo lector.** El límite de tiempo corre en la FPGA, así que la
+partida puede terminar mientras la terminal está esperando que el jugador
+escriba. Leyendo de forma sincrónica ese aviso no aparecería hasta que escribiera
+algo, que es justo cuando ya no sirve. Con el hilo lector el aviso sale en el
+momento, y la letra que el jugador teclee después se descarta en vez de contarse
+en la partida siguiente.
+
+**Ni tildes ni Ñ.** El banco no las tiene y la FPGA solo acepta A–Z, así que la
+terminal las rechaza con un mensaje propio en lugar de mandar un byte que se
+descartaría en silencio. Tampoco hay atajos de una sola letra para cerrar: la Q
+es una letra del banco y el jugador tiene que poder intentarla.
+
+El modo y el comienzo de la partida se eligen en la tarjeta. La terminal espera a
+que la FPGA anuncie el inicio.
 
 ---
 
@@ -641,3 +707,37 @@ Lo que hay que cubrir:
 Después de eso: síntesis sin latches ni múltiples drivers, implementación con
 timing cerrado a 100 MHz, simulación post-implementación cubriendo la recepción y
 validación de una letra, y prueba física.
+
+### Estado actual
+
+Los dieciséis módulos tienen testbench propio con resumen PASS/FAIL, y los
+dieciséis pasan. Los archivos de `DESIGN` compilan sin avisos bajo
+`verilator --lint-only -Wall`.
+
+La terminal de PC también tiene su prueba, con el mismo criterio y sin necesidad
+de la tarjeta: `PYTHON/SIMULATION/test_terminal.py` juega una partida completa
+contra un puerto serie falso que responde como respondería la FPGA, con la
+entrada del jugador sustituida por un guion. Comprueba el troceo de las cinco
+líneas del protocolo y de dos docenas de líneas rotas, el rechazo de entradas
+inválidas, que por el puerto no salga nunca nada que no sea una letra, y que el
+ruido en la línea no detenga la aplicación.
+
+El de `top` es la prueba de integración: instancia el sistema completo, pulsa los
+botones con el nivel mantenido lo suficiente para pasar el filtro de rebotes, y
+observa únicamente las patas del módulo LCD y la línea serie. El monitor
+reconstruye las dos filas del LCD siguiendo el cursor, de modo que lo que se
+compara es el texto que vería el jugador, y decodifica la trama bit a bit
+muestreando en el centro de cada bit, como haría Python. Cubre una partida:
+selección, cambio de modo, comienzo, letra acertada, letra fallada, derrota por
+seis fallos y vuelta sola a la selección.
+
+Los tiempos van reducidos por parámetro en los testbenches —el tick, los
+baudios, las esperas del LCD y la duración del resultado— porque con los valores
+reales una sola pantalla son millones de ciclos. Los valores reales están
+comprobados en el testbench de cada módulo, y esos mismos parámetros son los que
+hacen viable la simulación post-implementación temporizada.
+
+El núcleo UART sigue sin estar disponible. `SIMULATION/uart_core.sv` es un
+relleno provisional que envuelve el modelo de comportamiento para que el sistema
+completo se pueda elaborar y simular; no debe entrar al proyecto de Vivado como
+fuente de síntesis, y se borra en cuanto llegue el núcleo real.
