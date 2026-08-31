@@ -30,6 +30,7 @@ Ahorcado_juego_electrónico_FPGA_y_PC_por_enlace_serial/
 
 PYTHON/
 ├── DESIGN/                    aplicación de terminal y utilidades .py
+├── SIMULATION/                pruebas autoverificables .py
 └── DOCUMENTATION/
     ├── *.md
     └── FIGURAS/
@@ -46,7 +47,7 @@ El proyecto de Vivado no se versiona: es un artefacto generado. Las fuentes son
 |---|---|---|
 | Mariana Fallas Fallas | Núcleo del juego | `game_controller`, `lfsr`, `round_timer`, `word_rom` |
 | Abner López Méndez | Subsistema LCD | `lcd_controller`, `lcd_peripheral`, `lcd_screen_ctrl` |
-| Justin Garita Serrano | UART y aplicación de PC | `uart_peripheral`, `uart_msg_tx`, `uart_test_block`, terminal |
+| Justin Garita Serrano | UART y aplicación de PC | `uart_peripheral`, `uart_msg`, `uart_test_block`, terminal |
 | Jordi Segura Chinchilla | Periféricos locales e integración | `clk_tick_gen`, `button_input`, `display_controller`, `buzzer_controller`, `led_controller`, `top`, restricciones |
 
 Cada quien es dueño de sus módulos y de sus testbenches.
@@ -143,12 +144,26 @@ de los cinco bits bajos del LFSR, así que no puede caer fuera del rango largo.
 ```bash
 cd PYTHON/DESIGN
 pip install pyserial
+python ahorcado_terminal.py --list               # muestra los puertos
 python ahorcado_terminal.py --port COM4          # Windows
 python ahorcado_terminal.py --port /dev/ttyUSB0  # Linux
 ```
 
-Enlace a 115200 baudios. Para saber el puerto: en Windows, Administrador de
-dispositivos, *Puertos (COM y LPT)*; en Linux, `ls /dev/ttyUSB*`.
+Enlace a 115200 baudios. Para saber el puerto: `--list`, o en Windows el
+Administrador de dispositivos, *Puertos (COM y LPT)*, y en Linux
+`ls /dev/ttyUSB*`.
+
+El modo y el inicio de la partida se eligen en la tarjeta, no aquí: la terminal
+espera a que la FPGA anuncie el comienzo. Para cerrarla, escribir `salir` cuando
+pida una letra, o `Ctrl+C` en cualquier momento.
+
+Las pruebas de la terminal no necesitan la tarjeta: juegan una partida completa
+contra un puerto serie falso que responde como respondería la FPGA.
+
+```bash
+cd PYTHON/SIMULATION
+python test_terminal.py
+```
 
 ---
 
@@ -164,7 +179,7 @@ Mensajes ASCII terminados en salto de línea, con campos de ancho fijo.
 |---|---|---|
 | `START:<M>:<LL>` | modo y longitud | al iniciar la partida |
 | `PATT:<p>` | patrón, `_` en lo oculto | al iniciar y tras cada letra |
-| `LET:<X>:<R>` | letra y resultado: `OK `, `NO `, `RPT` | al evaluar una letra |
+| `LET:<X>:<R>` | letra y resultado, siempre 3 caracteres: `OK `, `NO `, `RPT` | al evaluar una letra |
 | `ERR:<n>` | intentos fallidos restantes | al iniciar y tras cada letra |
 | `END:<E>:<W>` | causa y palabra secreta | al terminar |
 
@@ -172,13 +187,16 @@ Mensajes ASCII terminados en salto de línea, con campos de ancho fijo.
 START:F:07
 PATT:_______
 ERR:6
-LET:A:OK
+LET:A:OK·
 PATT:A______
 ERR:6
-LET:Z:NO
+LET:Z:NO·
 PATT:A______
 ERR:5
 END:LTO:AVIONES
 ```
+
+El `·` marca el espacio con que se rellenan `OK` y `NO` hasta tres caracteres.
+No se transmite un punto: se transmite un espacio.
 
 El tiempo restante no se transmite: se muestra en los displays de 7 segmentos.
