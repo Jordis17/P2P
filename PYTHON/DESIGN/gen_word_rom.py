@@ -107,7 +107,7 @@ def emit_sv(words):
     a(f"    parameter int N_WORDS = {N_WORDS},")
     a(f"    parameter int MAX_LEN = {MAX_LEN}")
     a(") (")
-    a("    input  logic [5:0]              index_i,")
+    a("    input  logic [$clog2(N_WORDS)-1:0] index_i,")
     a("    output logic [8*MAX_LEN-1:0]    word_data_o,")
     a("    output logic [3:0]              word_len_o")
     a(");")
