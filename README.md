@@ -22,7 +22,7 @@ muestra lo que la FPGA responde.
 ```
 Ahorcado_juego_electrónico_FPGA_y_PC_por_enlace_serial/
 └── FPGA/
-    ├── DESIGN/                módulos .sv sintetizables y restricciones
+    ├── DESIGN/                módulos .sv sintetizables, núcleo UART .vhd y restricciones
     ├── SIMULATION/            testbenches .sv
     └── DOCUMENTATION/
         ├── *.md
@@ -61,7 +61,8 @@ Cada quien es dueño de sus módulos y de sus testbenches.
 | Xilinx Vivado | 2019.2 o superior | síntesis, implementación, simulación |
 | Digilent Nexys 4 | rev. B | implementación física |
 | PmodCLP | rev. B, 3.3 V | LCD 16×2, controlador Samsung KS0066 |
-| Python | 3.8 o superior | terminal y generador del banco |
+| Python | 3.8 o superior | terminal, generador del banco y script de regresión |
+| Icarus Verilog | 11 o superior | regresión de testbenches fuera de Vivado (opcional) |
 | pyserial | `pip install pyserial` | comunicación UART desde la PC |
 
 Se necesita además un altavoz amplificado o audífonos en el jack de 3.5 mm: la
@@ -114,6 +115,22 @@ el slack, la frecuencia máxima y que no se hayan inferido latches.
 Los testbenches de `FPGA/SIMULATION` son autoverificables: comprueban los
 resultados y terminan con un resumen de PASS/FAIL, sin necesidad de inspeccionar
 formas de onda.
+
+```bash
+cd Ahorcado_juego_electrónico_FPGA_y_PC_por_enlace_serial/FPGA/SIMULATION
+python run_tests.py            # los dieciséis testbenches
+python run_tests.py lcd        # solo los del LCD
+python run_tests.py --lint     # además revisa el RTL con verilator
+```
+
+El núcleo UART es VHDL e iverilog no lo compila, así que esta regresión corre
+contra el modelo de comportamiento. Por eso hay dos archivos que declaran
+`uart_core`: el de `DESIGN` instancia las entidades VHDL y es el que usa Vivado,
+y `SIMULATION/uart_core_sim.sv` resuelve lo mismo con el modelo. Nunca se
+compilan juntos; el script arma la lista de fuentes excluyendo el que no toca.
+
+La simulación contra el núcleo real se hace en Vivado, que sí entiende lenguaje
+mixto.
 
 La simulación post-implementación temporizada se corre sobre una variante con las
 constantes de tiempo reducidas, para que el arranque del LCD y las tramas UART

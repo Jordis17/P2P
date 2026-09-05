@@ -431,27 +431,59 @@ presentación.
 Con `send` que solo se puede poner y `new_rx` que se limpia escribiendo un uno,
 los dos campos son independientes.
 
-### El núcleo todavía no lo tenemos
+### El núcleo
 
-No conocemos sus puertos ni su configuración de trama. Para no quedarnos parados
-ni inventarnos una interfaz, `uart_peripheral` se diseña contra este supuesto:
+El profesor entregó un núcleo TX/RX en VHDL (`UART.vhd`, `UART_tx.vhd`,
+`UART_rx.vhd`) y pidió envolverlo en SystemVerilog. Los tres archivos están en
+`FPGA/DESIGN` tal como llegaron, sin modificar. La envoltura es
+`DESIGN/uart_core.sv` y es la capa de adaptación que habíamos previsto: todo lo
+que dependía del núcleo real queda ahí, y ni los registros ni nada por encima
+cambiaron.
 
-```systemverilog
-tx_data_o[7:0], tx_start_o, tx_busy_i
-rx_data_i[7:0], rx_valid_i
-```
+**No instanciamos `UART.vhd`.** Ese archivo solo cablea el transmisor con el
+receptor, pero no expone los genéricos de la velocidad, así que sus componentes
+se quedarían con los valores por omisión, que están calculados para un reloj de
+16 MHz. Instanciamos `UART_tx` y `UART_rx` directamente para poder pasarles los
+valores de 100 MHz. Se conserva el archivo en el repositorio aunque no se use.
 
-y toda la dependencia queda en una capa de adaptación dentro del periférico. Si
-el núcleo real es distinto, solo se toca esa capa: los registros, la semántica de
-`send` y `new_rx`, `uart_msg` y el `game_controller` no se enteran.
+**Velocidad.** El transmisor cuenta ciclos de reloj por bit; el receptor
+sobremuestrea por 16, así que su genérico es dieciseisavo:
 
-Para verificar mientras tanto usamos un modelo de comportamiento del núcleo y un
-modelo de línea serie a 115200 que permite comprobar la trama bit a bit. Cuando
-llegue el núcleo real, mismos estímulos con los dos y comparamos.
+| | Cálculo | Valor | Error |
+|---|---|---:|---:|
+| `BAUD_CLK_TICKS` (TX) | 100e6 / 115200 = 868.06 | 868 | −0.006 % |
+| `BAUD_X16_CLK_TICKS` (RX) | (100e6 / 115200) / 16 = 54.25 | 54 | −0.47 % |
 
-Si el núcleo usa sobremuestreo ×16 el divisor sería 54.25 → 54, con 0.47 % por
-bit y 4.7 % acumulado en diez: dentro del margen pero sin holgura. Hay que
-mirarlo.
+El −0.47 % del receptor se acumula dentro de la trama. El receptor muestrea el
+bit *k* a 1.5 + *k* tiempos de bit del flanco de arranque, así que en el último
+bit el desfase es 3.97 % de un bit. Sumando los 0.54 µs con que puede tardar en
+detectarse el flanco de arranque, otro 6.22 %, el peor caso queda en 10.2 % de
+un bit frente al 50 % disponible hasta el borde. Entra con holgura, pero era
+justo lo que habíamos anotado que había que mirar.
+
+**Dos cosas del núcleo que no coincidían con lo que habíamos supuesto.**
+
+`tx_rdy` no es una señal de listo pese al nombre: es un pulso de un ciclo al
+terminar cada byte. El periférico necesita un nivel de ocupado, y eso lo produce
+la envoltura entre la petición y ese pulso.
+
+Y el núcleo ignora `tx_start` durante casi un tiempo de bit después de terminar
+un byte, mientras mantiene alto su propio `start_reset`. Un pulso de un ciclo
+que caiga en esa ventana se pierde sin dejar rastro y el sistema se queda
+esperando para siempre. Por eso la envoltura convierte la petición en un nivel
+que se mantiene hasta que el núcleo confirma el fin: en cuanto la ventana se
+cierra, la toma. El efecto secundario es que entre dos bytes seguidos la línea
+queda en reposo unos tres tiempos de bit en vez de uno, lo que es válido en
+cualquier receptor y lleva el mensaje más largo de 3.0 ms a unos 4.0 ms.
+
+**Simulación.** iverilog no compila VHDL, así que la regresión sigue corriendo
+contra el modelo de comportamiento, con `SIMULATION/uart_core_sim.sv`
+declarando el mismo módulo. El núcleo real se simula en Vivado, que sí entiende
+lenguaje mixto, con las mismas pruebas: ahí es donde se comprueba que la
+interfaz supuesta y la real coinciden.
+
+Los dos archivos declaran `uart_core` y nunca se compilan juntos.
+`SIMULATION/run_tests.py` arma la lista de fuentes excluyendo el que no toca.
 
 ### Bloque de pruebas
 
@@ -737,7 +769,9 @@ reales una sola pantalla son millones de ciclos. Los valores reales están
 comprobados en el testbench de cada módulo, y esos mismos parámetros son los que
 hacen viable la simulación post-implementación temporizada.
 
-El núcleo UART sigue sin estar disponible. `SIMULATION/uart_core.sv` es un
-relleno provisional que envuelve el modelo de comportamiento para que el sistema
-completo se pueda elaborar y simular; no debe entrar al proyecto de Vivado como
-fuente de síntesis, y se borra en cuanto llegue el núcleo real.
+La regresión se corre con `python run_tests.py` desde `FPGA/SIMULATION`, o con
+`--lint` para revisar además el RTL con verilator.
+
+Falta correr las mismas pruebas en Vivado contra el núcleo real en VHDL y
+comparar los resultados con los del modelo. Hasta que eso esté hecho, lo
+verificado es la lógica del sistema, no la integración con el núcleo.
