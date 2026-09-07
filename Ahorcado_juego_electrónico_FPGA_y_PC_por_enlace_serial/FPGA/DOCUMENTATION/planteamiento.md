@@ -263,6 +263,17 @@ traduce un evento del juego —«empezó la partida», «esta letra acertó»—
 trama de texto correspondiente y la envía byte por byte. En sentido contrario,
 descarta cualquier byte que no sea una letra mayúscula antes de entregarlo.
 
+Las dos direcciones viven en el mismo bloque a propósito. Leer la letra obliga a
+consultar el aviso de byte nuevo, leer el registro de recepción y escribir el bit
+que lo limpia, todo sobre el mismo bus por el que salen las tramas. Si el control
+del juego leyera por su cuenta habría dos módulos manejando el mismo periférico,
+con una trama saliendo y una letra entrando a la vez. Con la recepción aquí, cada
+periférico conserva un único maestro, igual que el LCD.
+
+El núcleo serial no lo diseña el equipo: el curso lo entregó en VHDL y sobre él
+se construye el periférico. El equipo aporta una envoltura en SystemVerilog que
+lo adapta a la interfaz que espera el periférico.
+
 ## 8. Indicadores locales
 
 **Objetivo.** Mostrar el estado del sistema en la propia tarjeta, sin depender de
@@ -321,8 +332,8 @@ flowchart LR
     BOK["button_input OK"] -.->|ok_ev| GC
     BRST["button_input RST"] -.->|rst| GC
     LFSR["lfsr<br/>registro 8 bits + XOR de taps"] -->|"lfsr_q 8"| GC
-    UP["uart_peripheral"] -->|"rx_letter 8"| GC
-    UP -.->|new_rx| GC
+    UM["uart_msg"] -->|"rx_letter 8"| GC
+    UM -.->|rx_valid| GC
 
     GC["game_controller<br/>FSM + datapath"]
 
@@ -337,7 +348,7 @@ flowchart LR
 
 ```mermaid
 flowchart LR
-    GC["game_controller"] -->|"screen_id 2 + datos"| LSC["lcd_screen_ctrl<br/>ROM de textos + secuenciador"]
+    GC["game_controller"] -->|"screen_id 3 + datos"| LSC["lcd_screen_ctrl<br/>ROM de textos + secuenciador"]
     LSC -.->|busy| GC
     LSC -->|"we, addr 2, wdata 32"| LP["lcd_peripheral<br/>registros de 32 bits"]
     LP -->|"rdata 32"| LSC
@@ -346,11 +357,12 @@ flowchart LR
     LC -.->|busy, done| LP
     LC -->|"db 8 + rs, rw, e"| PMOD["PmodCLP"]
 
-    GC -->|"ev_id 2 + datos"| UMT["uart_msg_tx<br/>ROM de plantillas + serializador"]
+    GC -->|"ev_id 2 + datos"| UMT["uart_msg<br/>ROM de plantillas + serializador"]
     UMT -.->|busy| GC
+    UMT -->|"rx_letter 8, rx_valid"| GC
     UMT -->|"we, addr 2, wdata 32"| UP["uart_peripheral<br/>registros de 32 bits"]
     UP -->|"rdata 32"| UMT
-    UP -->|"tx_data 8"| UC["uart_core"]
+    UP -->|"tx_data 8"| UC["uart_core<br/>envoltura del nucleo VHDL"]
     UP -.->|send| UC
     UC -.->|rx_valid, tx_busy| UP
     UC -->|"rx_data 8"| UP
@@ -378,7 +390,8 @@ flowchart LR
 | `lcd_screen_ctrl` | ROM de textos fijos, contador de posición de 5 bits, mux de fuente de carácter, FSM |
 | `lcd_peripheral` | tres registros de 32 bits, decodificador de dirección, mux de lectura 4:1, lógica de set y clear por bit |
 | `lcd_controller` | FSM de inicialización y escritura, contador de espera de 18 bits, registros de salida |
-| `uart_msg_tx` | ROM de plantillas, contador de byte, mux de fuente, conversor de binario a ASCII, FSM |
+| `uart_msg` | ROM de plantillas, contador de byte, mux de fuente, conversor de binario a ASCII, comparador de rango A-Z, FSM de transmisión y recepción |
+| `uart_core` | envoltura del núcleo VHDL: biestable de petición sostenida y generación del nivel de ocupado |
 | `uart_peripheral` | tres registros de 32 bits, decodificador de dirección, mux de lectura, biestables de `send` y `new_rx` |
 | `display_controller` | contador de dígito de 2 bits, mux 4:1 de nibbles, decodificador BCD a siete segmentos, decodificador de ánodo |
 | `buzzer_controller` | contador divisor de 17 bits, comparador de semiperiodo, biestable de salida, contador de duración, FSM de tonos |
@@ -458,40 +471,61 @@ caminos.
 
 ```mermaid
 stateDiagram-v2
-    [*] --> MODE_SELECT
-    MODE_SELECT --> MODE_SELECT: sel_ev / cambia modo, redibuja
-    MODE_SELECT --> START_GAME: ok_ev / captura lfsr
-    START_GAME --> NOTIFY_START: carga palabra, limpia estado, arranca timer
-    NOTIFY_START --> PLAYING: capas libres
+    [*] --> DIBUJA_SEL
+    DIBUJA_SEL --> SELECCION: pantalla de seleccion pedida
 
-    PLAYING --> PLAYING: byte invalido
-    PLAYING --> NOTIFY_REPEAT: letra repetida
-    PLAYING --> EVAL: letra nueva
-    PLAYING --> LOSE_TIMEOUT: timeout y capas libres
+    SELECCION --> DIBUJA_SEL: sel_ev / cambia modo
+    SELECCION --> CARGA: ok_ev / captura lfsr
 
-    NOTIFY_REPEAT --> PLAYING: capas libres
-    EVAL --> NOTIFY_LETTER: revela o suma error
-    NOTIFY_LETTER --> WIN: victoria
-    NOTIFY_LETTER --> LOSE_ERROR: sexto error
-    NOTIFY_LETTER --> PLAYING: continua
+    CARGA --> INICIO: registra palabra, limpia estado, carga timer
+    INICIO --> ESPERA_INICIO: pide pantalla y trama de comienzo
+    ESPERA_INICIO --> JUGANDO: capas libres
 
-    WIN --> RESULT: incrementa victorias
-    LOSE_ERROR --> RESULT
-    LOSE_TIMEOUT --> RESULT
-    RESULT --> MODE_SELECT: 3 s desde el fin del dibujado
+    JUGANDO --> FIN: timeout / desenlace LTO
+    JUGANDO --> EVALUA: letra recibida
+
+    EVALUA --> PUBLICA: revela, suma error o marca repetida
+    PUBLICA --> ESPERA_JUGADA: pide trama, y pantalla y sonido si no es repetida
+
+    ESPERA_JUGADA --> FIN: victoria WIN, sexto error LER o timeout LTO, en ese orden
+    ESPERA_JUGADA --> JUGANDO: continua
+
+    FIN --> ESPERA_FIN: pantalla de resultado, trama y sonido
+    ESPERA_FIN --> RESULTADO: capas libres / arranca los 3 s
+    RESULTADO --> DIBUJA_SEL: 3 s desde el fin del dibujado
 ```
 
-Los estados `NOTIFY_*` existen porque las capas de presentación tardan
-milisegundos en completar una pantalla o una trama. Sin ellos la máquina
-avanzaría antes de que el mensaje saliera, y el jugador vería información
-desactualizada.
+El contador de victorias sube al entrar en `FIN`, y solo si el desenlace es
+victoria.
 
-El orden de salida de `NOTIFY_LETTER` es victoria, luego sexto error, luego
-continuar. Ese orden importa: una letra que completa la palabra no puede ser a la
-vez el error que hace perder la partida.
+Doce estados, de los cuales cuatro son de espera. Existen porque las capas de
+presentación tardan milisegundos en completar una pantalla o una trama: sin
+ellos la máquina avanzaría antes de que el mensaje saliera y el jugador vería
+información desactualizada.
 
-El timeout se atiende solo con las capas libres, para no cortar una pantalla a
-medias ni una trama por la mitad.
+**Un solo estado de fin, no tres.** Ganar, perder por fallos y perder por tiempo
+hacen exactamente lo mismo: pintar, notificar, sonar y esperar. Lo único que
+cambia es un código de dos bits, y ese código es justo lo que las dos capas de
+presentación reciben como entrada. Tres estados que solo se diferencian en un
+dato pertenecen al camino de datos y no al control; con estados separados habría
+que escribir la misma secuencia de publicación tres veces. La diferencia sigue
+viéndose donde importa: el LCD muestra `GANASTE`, `PERDISTE: FALLOS` o
+`PERDISTE: TIEMPO`, y la computadora recibe `WIN`, `LER` o `LTO`.
+
+**`CARGA` va aparte de `INICIO`** porque las capas copian los datos en el mismo
+flanco en que aceptan la orden. Registrar la palabra y disparar el dibujo en el
+mismo estado haría que copiaran los valores viejos.
+
+El orden de salida de `ESPERA_JUGADA` es victoria, luego sexto error, luego
+vencimiento del tiempo. Ese orden importa: una letra que completa la palabra no
+puede ser a la vez el error que hace perder la partida.
+
+El vencimiento del tiempo se atiende solo con las capas libres, para no cortar
+una pantalla a medias ni una trama por la mitad. La señal es un nivel y no un
+pulso, así que sigue presente cuando la máquina llega al estado de espera.
+
+Una letra repetida no cambia nada visible ni consume intento, así que solo se
+avisa a la computadora: no se redibuja ni suena.
 
 ## 3.7 Máquina de estados del periférico LCD
 
@@ -611,7 +645,7 @@ flowchart LR
 
     GC["game_controller"]
 
-    GC -->|"screen_id 2 + datos"| LSC["lcd_screen_ctrl"]
+    GC -->|"screen_id 3 + datos"| LSC["lcd_screen_ctrl"]
     GC -.->|redraw| LSC
     LSC -.->|busy| GC
     LSC <-->|"interfaz 32 bits"| LP["lcd_peripheral"]
@@ -620,16 +654,16 @@ flowchart LR
     LC -.->|busy, done| LP
     LC -->|"lcd_db 8 + rs, rw, e"| OLCD["a PmodCLP"]
 
-    GC -->|"ev_id 2 + datos"| UMT["uart_msg_tx"]
+    GC -->|"ev_id 2 + datos"| UMT["uart_msg"]
     GC -.->|ev_start| UMT
     UMT -.->|busy| GC
+    UMT -->|"rx_letter 8"| GC
+    UMT -.->|rx_valid| GC
     UMT <-->|"interfaz 32 bits"| UP["uart_peripheral"]
     UP -->|"tx_data 8"| UC
     UP -.->|send| UC
     UC -->|"rx_data 8"| UP
     UC -.->|rx_valid, tx_busy| UP
-    UP -->|"rx_letter 8"| GC
-    UP -.->|new_rx| GC
     UC -->|uart_tx_o| OTX["a la PC"]
 
     GC -->|"time_s 7 + wins_bcd 8"| DISP
@@ -640,7 +674,10 @@ flowchart LR
     BUZZ -->|"aud_pwm, aud_sd"| OAUD["a amplificador"]
 ```
 
-Este plano reúne los catorce módulos y todas las señales que los conectan. Las
+Este plano reúne los dieciséis módulos que instancia el bloque superior y todas
+las señales que los conectan. No aparece `uart_test_block`, que sustituye a la
+capa de protocolo como maestro del periférico UART cuando se activa el modo de
+prueba por parámetro; en síntesis solo queda uno de los dos. Las
 líneas continuas llevan datos con su ancho indicado, las punteadas llevan
 control, y las flechas dobles representan la interfaz estándar de registros de
 32 bits, que en ambos sentidos son `write_enable`, `addr`, `wdata` y `rdata`.
@@ -1314,7 +1351,7 @@ está en un estado no previsto.
 
 ### Objetivo
 
-Instanciar los catorce módulos, conectarlos según el plano 1 y propagar los
+Instanciar los dieciséis módulos, conectarlos según el plano 1 y propagar los
 parámetros globales. No contiene lógica del juego.
 
 ### Entradas y salidas
