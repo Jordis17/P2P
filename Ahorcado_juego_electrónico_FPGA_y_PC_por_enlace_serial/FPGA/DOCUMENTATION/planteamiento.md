@@ -532,21 +532,29 @@ avisa a la computadora: no se redibuja ni suena.
 ```mermaid
 stateDiagram-v2
     [*] --> POWER_ON
-    POWER_ON --> FUNCTION_SET: 50 ms cumplidos
-    FUNCTION_SET --> DISPLAY_ON: 60 us
-    DISPLAY_ON --> CLEAR_INIT: 60 us
-    CLEAR_INIT --> ENTRY_MODE: 2 ms
-    ENTRY_MODE --> IDLE: 60 us
+    POWER_ON --> CARGA: 50 ms cumplidos
 
-    IDLE --> SETUP: solicitud aceptada
-    SETUP --> E_HIGH: 200 ns, datos y rs estables
-    E_HIGH --> E_LOW: 1 us
-    E_LOW --> WAIT: 1 us, el dato entra en el flanco
-    WAIT --> IDLE: 60 us o 2 ms segun la operacion
+    CARGA --> SETUP: presenta datos y rs en el bus
+    SETUP --> E_ALTO: 200 ns, datos y rs estables
+    E_ALTO --> E_BAJO: 1 us
+    E_BAJO --> ESPERA: 1 us, el dato entra en el flanco de bajada
+    ESPERA --> CARGA: falta algun paso de la inicializacion
+    ESPERA --> IDLE: era el ultimo paso, o una operacion pedida
+
+    IDLE --> CARGA: solicitud aceptada
 ```
 
+**Los cuatro comandos de arranque no son cuatro estados.** `Function Set`,
+`Display On`, `Clear Display` y `Entry Mode` recorren exactamente el mismo ciclo
+de bus y solo se diferencian en el byte que se emite y en la espera que sigue.
+Un contador de paso de dos bits elige ambos, y el ciclo se escribe una sola vez.
+Cuando ese contador llega al final, un biestable marca la inicialización como
+terminada y a partir de ahí `ESPERA` vuelve a `IDLE` en lugar de a `CARGA`.
+
 La inicialización arranca sola al salir de configuración, sin depender del
-pulsador de reinicio, porque el LCD debe quedar listo al encender la tarjeta.
+pulsador de reinicio, porque el LCD debe quedar listo al encender la tarjeta. Un
+reinicio durante la operación normal aborta la transacción en curso y vuelve a
+reposo, pero nunca repite los 50 ms de arranque, que ya no hacen falta.
 
 Las esperas de la columna izquierda están tomadas del manual del PmodCLP. Los
 tiempos del ciclo de bus, que ese manual no especifica, se fijaron con margen
