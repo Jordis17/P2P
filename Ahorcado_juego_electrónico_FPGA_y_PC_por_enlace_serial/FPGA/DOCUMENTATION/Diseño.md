@@ -588,7 +588,8 @@ significa que **hay que llevar audífonos o un parlante a la presentación**.
 
 Cómo se maneja esa salida está sin cerrar: ver la sección 15.
 
-Si en el aula no se oye, quedan libres JB7–JB10 para un Pmod buzzer.
+Si en el aula no se oye, queda libre la fila de arriba de JB (JB1–JB4) para
+un Pmod buzzer, además de los conectores JC y JD enteros.
 
 ---
 
@@ -627,9 +628,9 @@ que la FPGA anuncie el inicio.
 | Reloj | `clk_i` | | E3 |
 | LCD `DB[3:0]` | `lcd_db_o[3:0]` | JA1–JA4 | B13, F14, D17, E17 |
 | LCD `DB[7:4]` | `lcd_db_o[7:4]` | JA7–JA10 | G13, C17, D18, E18 |
-| LCD `RS` | `lcd_rs_o` | JB1 | G14 |
-| LCD `R/W` | `lcd_rw_o` | JB2 | P15 |
-| LCD `E` | `lcd_e_o` | JB3 | V11 |
+| LCD `RS` | `lcd_rs_o` | JB7 | K16 |
+| LCD `R/W` | `lcd_rw_o` | JB8 | R16 |
+| LCD `E` | `lcd_e_o` | JB9 | T9 |
 | Audio | `aud_pwm_o` | AUD_PWM | A11 |
 | Habilitación de audio | `aud_sd_o` | AUD_SD | D12 · *sin confirmar, ver sección 15* |
 | `BTN_RST` | `btn_rst_i` | btnC | E16 |
@@ -642,10 +643,11 @@ que la FPGA anuncie el inicio.
 | LEDs de estado | `led_o[2:0]` | LED0–LED2 | T8, V9, R8 |
 | LED de modo | `led_o[15]` | LED15 | P2 |
 
-El PmodCLP ocupa el conector JA completo más la fila de arriba de JB, porque J1
-lleva los ocho bits de datos y J2 las tres señales de control. Hay que
-comprobarlo físicamente antes de la primera prueba. La revisión B funciona a
-3.3 V, que es lo que dan los Pmod.
+El PmodCLP ocupa el conector JA completo más la fila de abajo de JB, porque J1
+lleva los ocho bits de datos y J2 las tres señales de control. La fila de abajo
+no es una preferencia: montando la tarjeta se comprobó que, con J1 metido en el
+JA, el J2 no alcanza la fila de arriba. La revisión B funciona a 3.3 V, que es
+lo que dan los Pmod.
 
 Todo con `IOSTANDARD LVCMOS33`. El XDC está en
 `constraints/nexys4_ahorcado.xdc`, con el `create_clock` de 10 ns.
@@ -691,7 +693,7 @@ como triestado, poniendo `0` o alta impedancia en vez de `0` o `1`.
 
 Las dos cosas hay que mirarlas en el esquemático de la tarjeta antes de escribir
 el `buzzer_controller`. Si el tema se complica, el plan B del Pmod buzzer en
-JB7–JB10 lo resuelve sin depender de nada de esto.
+la fila de arriba de JB lo resuelve sin depender de nada de esto.
 
 ### Lo demás pendiente
 
