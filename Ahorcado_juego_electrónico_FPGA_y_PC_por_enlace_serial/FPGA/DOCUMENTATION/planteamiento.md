@@ -707,7 +707,7 @@ doce pines con el bus de datos y otro de seis con las señales de control.
 flowchart LR
     subgraph NEXYS["Nexys 4"]
         JA["Conector JA<br/>12 pines"]
-        JB["Conector JB<br/>fila superior"]
+        JB["Conector JB<br/>fila inferior"]
     end
 
     subgraph PMOD["PmodCLP rev B"]
@@ -717,9 +717,9 @@ flowchart LR
 
     JA -->|"JA1-JA4 a DB0-DB3<br/>B13, F14, D17, E17"| J1
     JA -->|"JA7-JA10 a DB4-DB7<br/>G13, C17, D18, E18"| J1
-    JB -->|"JB1 a RS -- G14"| J2
-    JB -->|"JB2 a R/W -- P15"| J2
-    JB -->|"JB3 a E -- V11"| J2
+    JB -->|"JB7 a RS -- K16"| J2
+    JB -->|"JB8 a R/W -- R16"| J2
+    JB -->|"JB9 a E -- T9"| J2
     JA -->|"VCC 3.3 V y GND"| J1
     JB -->|"VCC 3.3 V y GND"| J2
 ```
@@ -734,9 +734,9 @@ flowchart LR
 | J1-8 | `DB5` | JA8 | C17 |
 | J1-9 | `DB6` | JA9 | D18 |
 | J1-10 | `DB7` | JA10 | E18 |
-| J2-1 | `RS` | JB1 | G14 |
-| J2-2 | `R/W` | JB2 | P15 |
-| J2-3 | `E` | JB3 | V11 |
+| J2-1 | `RS` | JB7 | K16 |
+| J2-2 | `R/W` | JB8 | R16 |
+| J2-3 | `E` | JB9 | T9 |
 | J1-5, J1-11, J2-5 | `GND` | GND del conector | — |
 | J1-6, J1-12, J2-6 | `VCC` | VCC del conector | — |
 
@@ -745,10 +745,13 @@ Tres advertencias para el montaje:
 1. **La revisión B del PmodCLP funciona a 3.3 V.** Los conectores Pmod de la
    Nexys 4 entregan 3.3 V, así que la alimentación es directa. La revisión A del
    mismo módulo requiere 5 V y no debe conectarse a estos conectores.
-2. **J1 ocupa el conector JA completo**, incluidas sus dos filas. J2 ocupa
-   únicamente la fila superior de JB, y la fila inferior queda libre.
+2. **J1 ocupa el conector JA completo**, incluidas sus dos filas. J2 va en la
+   fila **inferior** de JB. No es una preferencia: con J1 metido en el JA, el
+   J2 no llega físicamente a la fila de arriba, y eso se comprobó montando la
+   tarjeta. La fila superior de JB queda libre.
 3. **El pin 4 de J2 no está conectado** en el módulo. Corresponde a la
-   retroiluminación opcional y en el PmodCLP no se usa.
+   retroiluminación opcional y en el PmodCLP no se usa. Cae sobre JB10 (U11),
+   así que ese pin queda tapado por el conector y tampoco sirve para otra cosa.
 
 ### Conexiones internas de la tarjeta
 

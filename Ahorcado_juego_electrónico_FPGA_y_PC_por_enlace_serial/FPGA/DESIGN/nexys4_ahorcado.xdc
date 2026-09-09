@@ -55,7 +55,16 @@ set_property PACKAGE_PIN D4 [get_ports uart_tx_o]
 ##
 ## Conexion fisica (verificar antes de la primera prueba):
 ##   PmodCLP J1 (12 pines) -> Pmod JA completo   : DB0..DB7
-##   PmodCLP J2 (6 pines)  -> Pmod JB fila sup.  : RS, R/W, E
+##   PmodCLP J2 (6 pines)  -> Pmod JB fila inf.  : RS, R/W, E
+##
+## El J2 va en la fila de ABAJO del JB, no en la de arriba: con el J1
+## metido en el JA de doce pines, el J2 solo alcanza fisicamente esa
+## fila. Comprobado montando la tarjeta.
+##
+## El J2 lleva seis contactos: RS, R/W, E, uno sin conexion, GND y VCC.
+## El cuarto cae sobre JB10 (U11), asi que ese pin queda tapado por el
+## conector aunque el RTL no lo use, y no se puede aprovechar para otra
+## cosa.
 ## El PmodCLP rev B requiere alimentacion de 3.3 V (la que dan los Pmod).
 ## ---------------------------------------------------------------------
 ## DB[3:0] -> JA1..JA4
@@ -76,12 +85,12 @@ set_property PACKAGE_PIN D18 [get_ports {lcd_db_o[6]}]
     set_property IOSTANDARD LVCMOS33 [get_ports {lcd_db_o[6]}]
 set_property PACKAGE_PIN E18 [get_ports {lcd_db_o[7]}]
     set_property IOSTANDARD LVCMOS33 [get_ports {lcd_db_o[7]}]
-## Control -> JB1..JB3
-set_property PACKAGE_PIN G14 [get_ports lcd_rs_o]
+## Control -> JB7..JB9 (fila inferior del JB)
+set_property PACKAGE_PIN K16 [get_ports lcd_rs_o]
     set_property IOSTANDARD LVCMOS33 [get_ports lcd_rs_o]
-set_property PACKAGE_PIN P15 [get_ports lcd_rw_o]
+set_property PACKAGE_PIN R16 [get_ports lcd_rw_o]
     set_property IOSTANDARD LVCMOS33 [get_ports lcd_rw_o]
-set_property PACKAGE_PIN V11 [get_ports lcd_e_o]
+set_property PACKAGE_PIN T9 [get_ports lcd_e_o]
     set_property IOSTANDARD LVCMOS33 [get_ports lcd_e_o]
 
 ## ---------------------------------------------------------------------
@@ -188,5 +197,7 @@ set_property PACKAGE_PIN P2 [get_ports {led_o[15]}]
 
 ## ---------------------------------------------------------------------
 ## Pines Pmod libres reservados para buzzer alternativo (plan B)
-##   JB7..JB10 = K16, R16, T9, U11
+##   JB1..JB4 = G14, P15, V11, V15  (fila superior del JB)
+##   El JB10 (U11) ya no sirve: lo ocupa el cuarto contacto del J2 del
+##   PmodCLP. Los conectores JC y JD estan enteros sin usar.
 ## ---------------------------------------------------------------------
