@@ -31,7 +31,15 @@ AQUI   = Path(__file__).resolve().parent
 DESIGN = AQUI.parent / "DESIGN"
 
 # El nucleo de DESIGN instancia VHDL: iverilog usa el de aqui.
-RTL = sorted(p for p in DESIGN.glob("*.sv") if p.name != "uart_core.sv")
+#
+# Los paquetes van primero. iverilog compila en el orden de la linea de
+# comandos y necesita el paquete antes que cualquier modulo que lo
+# importe; por orden alfabetico, lcd_screen_ctrl.sv caeria antes de
+# lcd_screen_pkg.sv y la compilacion fallaria. Vivado resuelve esa
+# dependencia por su cuenta, iverilog no.
+_FUENTES = sorted(p for p in DESIGN.glob("*.sv") if p.name != "uart_core.sv")
+RTL = ([p for p in _FUENTES if p.stem.endswith("_pkg")] +
+       [p for p in _FUENTES if not p.stem.endswith("_pkg")])
 
 # Archivos de apoyo que necesita cada testbench, ademas de todo el RTL.
 APOYO = {
@@ -64,17 +72,35 @@ def correr(tb: Path) -> tuple[str, str]:
     return nombre, "SIN RESUMEN\n" + ejecucion.stdout.strip()
 
 
+# Archivos que solo tienen sentido revisar con todo junto, porque
+# instancian otros modulos y por si solos no los encuentran.
+SOLO_CON_TODO = {"top.sv", "lcd_screen_ctrl.sv"}
+
+
 def lint() -> int:
     fallos = 0
-    # top.sv solo tiene sentido revisarlo con todo junto: por si solo no
-    # encuentra los modulos que instancia.
-    for fuente in (p for p in RTL if p.name != "top.sv"):
-        r = subprocess.run(["verilator", "--lint-only", "-Wall", str(fuente)],
+
+    # Los paquetes acompanan a cada archivo del repaso individual: quien
+    # los importa no compila sin ellos. Por si solos no se revisan, porque
+    # un paquete no es un modulo de nivel superior.
+    paquetes = [str(p) for p in RTL if p.stem.endswith("_pkg")]
+
+    # Al revisar un modulo suelto con el paquete al lado, verilator avisa
+    # de las constantes del paquete que ese modulo no usa. En el diseno
+    # completo todas se usan, asi que en el repaso individual ese aviso no
+    # dice nada y se calla. El repaso del sistema completo, que es el que
+    # vale, se hace mas abajo sin silenciar nada.
+    sueltos = [p for p in RTL
+               if p.name not in SOLO_CON_TODO and not p.stem.endswith("_pkg")]
+    for fuente in sueltos:
+        r = subprocess.run(["verilator", "--lint-only", "-Wall",
+                            "-Wno-UNUSEDPARAM"] + paquetes + [str(fuente)],
                            capture_output=True, text=True)
         if r.returncode != 0:
             print(f"  LINT {fuente.name}\n{r.stderr}")
             fallos += 1
-    # el top solo se puede revisar con todo junto
+
+    # El sistema completo, sin excepciones de ningun tipo.
     r = subprocess.run(["verilator", "--lint-only", "-Wall", "--top-module", "top"]
                        + [str(p) for p in RTL]
                        + [str(AQUI / "uart_core_sim.sv"),
@@ -83,7 +109,11 @@ def lint() -> int:
     if r.returncode != 0:
         print("  LINT del sistema completo\n" + r.stderr)
         fallos += 1
-    print(f"  lint: {len(RTL)} archivos de RTL, {fallos} con avisos")
+
+    print(f"  lint: {len(sueltos)} modulos por separado y el sistema completo, "
+          f"{fallos} con avisos")
+    print(f"  ({len(paquetes)} paquete(s) de apoyo; "
+          f"{', '.join(sorted(SOLO_CON_TODO))} solo con todo junto)")
     print("  (uart_core.sv no se revisa aqui: instancia entidades VHDL)")
     return fallos
 
