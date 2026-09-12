@@ -5,7 +5,7 @@
 //   1. el contador de digito recorre 0,1,2,3 y vuelve a empezar
 //   2. cada digito muestra el valor que le corresponde
 //   3. solo hay un anodo activo en cada instante
-//   4. AN4 a AN7 permanecen apagados siempre
+//   4. los cuatro anodos que no se usan permanecen apagados siempre
 //   5. el ciclo completo dura cuatro ticks
 //   6. la conversion de segundos a BCD es correcta en todo el rango util
 //   7. un valor fuera de rango apaga el digito en vez de mostrar basura
@@ -42,6 +42,18 @@ module tb_display_controller;
     int errores = 0;
     int i, k, activos, esperado, leido;
     int orden [0:3];
+
+    // Anodo que le toca a cada turno del barrido. Las victorias van en el
+    // bloque derecho y los segundos en el izquierdo, por eso la secuencia
+    // salta de AN1 a AN4.
+    function automatic int an_del_turno(input int p);
+        case (p)
+            0:       return 0;   // AN0, unidades de victorias
+            1:       return 1;   // AN1, decenas de victorias
+            2:       return 4;   // AN4, unidades de segundos
+            default: return 5;   // AN5, decenas de segundos
+        endcase
+    endfunction
 
     always #5 clk = ~clk;
 
@@ -106,11 +118,12 @@ module tb_display_controller;
     // Recorre un ciclo completo y comprueba digito, anodo y exclusividad
     task automatic recorrer_ciclo(input int u_win, input int d_win,
                                   input int u_seg, input int d_seg);
-        int esperados [0:3];
-        esperados[0] = u_win;
-        esperados[1] = d_win;
-        esperados[2] = u_seg;
-        esperados[3] = d_seg;
+        int esperados [0:7];
+        for (int b = 0; b < 8; b++) esperados[b] = -3;   // anodo sin usar
+        esperados[an_del_turno(0)] = u_win;
+        esperados[an_del_turno(1)] = d_win;
+        esperados[an_del_turno(2)] = u_seg;
+        esperados[an_del_turno(3)] = d_seg;
 
         for (int p = 0; p < 4; p++) begin
             activos = 0;
@@ -118,14 +131,14 @@ module tb_display_controller;
             check(activos == 1,
                   $sformatf("hay %0d anodos activos a la vez", activos));
 
-            check(van[7:4] === 4'd0,
-                  $sformatf("AN4..AN7 deben estar apagados, valen %b", van[7:4]));
+            check(van[3:2] === 2'd0 && van[7:6] === 2'd0,
+                  $sformatf("AN2, AN3, AN6 y AN7 deben estar apagados, van vale %b", van));
 
             leido = anodo_activo(van);
-            check(leido >= 0 && leido <= 3,
-                  $sformatf("anodo activo fuera de AN0..AN3: %0d", leido));
+            check(leido >= 0 && esperados[leido] != -3,
+                  $sformatf("anodo activo fuera de los cuatro que se usan: %0d", leido));
 
-            if (leido >= 0 && leido <= 3) begin
+            if (leido >= 0 && esperados[leido] != -3) begin
                 esperado = esperados[leido];
                 check(patron_a_digito(vseg) == esperado,
                       $sformatf("en AN%0d se esperaba el digito %0d y se leyo %0d",
@@ -172,10 +185,16 @@ module tb_display_controller;
         // ---------- 1 y 5: el barrido recorre los cuatro y vuelve ----------
         check(orden[0] != orden[1] && orden[1] != orden[2] && orden[2] != orden[3],
               "el barrido repite digitos dentro de un ciclo");
-        check((orden[1] == (orden[0] + 1) % 4) &&
-              (orden[2] == (orden[1] + 1) % 4) &&
-              (orden[3] == (orden[2] + 1) % 4),
-              "el barrido no avanza de uno en uno");
+        // El ciclo puede arrancar en cualquier turno, asi que se busca en
+        // cual empezo y se comprueba que siga la secuencia desde ahi.
+        i = -1;
+        for (int p = 0; p < 4; p++) if (an_del_turno(p) == orden[0]) i = p;
+        check(i >= 0, "el barrido arranco en un anodo que no se usa");
+        if (i >= 0)
+            check((orden[1] == an_del_turno((i + 1) % 4)) &&
+                  (orden[2] == an_del_turno((i + 2) % 4)) &&
+                  (orden[3] == an_del_turno((i + 3) % 4)),
+                  "el barrido no sigue el orden de anodos previsto");
 
         // ---------- 7: nibble fuera de rango apaga el digito ----------
         wins_bcd = 8'hAF;              // A y F no son digitos BCD validos

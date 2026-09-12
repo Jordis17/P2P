@@ -1,35 +1,24 @@
 // =====================================================================
 // display_controller.sv - Multiplexado de los displays de 7 segmentos
 //
-// Los cuatro digitos comparten fisicamente las siete lineas de segmento,
-// asi que solo puede haber uno encendido en cada instante. El contador de
-// digito avanza con cada tick de 1 ms y selecciona a la vez que nibble se
-// decodifica y que anodo se activa.
+// Los cuatro digitos que usa el juego comparten fisicamente las siete
+// lineas de segmento, por lo que no se pueden encender todos a la vez.
+// Para mostrarlos se van activando uno por uno, lo suficientemente
+// rapido como para que el ojo los perciba como si estuvieran encendidos
+// al mismo tiempo.
 //
-//   AN0  unidades de victorias      AN2  unidades de segundos
-//   AN1  decenas de victorias       AN3  decenas de segundos
-//   AN4..AN7 permanecen apagados
+// El cambio de digito se hace con cada tick de 1 ms. Como hay cuatro
+// digitos, una vuelta completa toma 4 ms, dando un refresco de 250 Hz.
+// Esto es suficiente para que el cambio entre digitos no sea visible.
 //
-// Frecuencia de barrido
-// ---------------------
-//   un digito por milisegundo, cuatro digitos -> 4 ms por ciclo completo
-//   1 / 4 ms = 250 Hz
-// El umbral de fusion de parpadeo del ojo esta alrededor de 60 Hz, asi
-// que 250 Hz queda holgado. Reutilizar el tick de 1 ms evita anadir un
-// contador dedicado.
+// Las dos cantidades van en bloques distintos de la tarjeta para que no
+// se lean como un solo numero: AN0 y AN1 muestran las victorias y AN4 y
+// AN5 los segundos restantes, uno a cada lado del hueco que separa los
+// dos grupos de displays. AN2, AN3, AN6 y AN7 no se utilizan.
 //
-// Conversion del tiempo a BCD
-// ---------------------------
-// El temporizador entrega segundos en binario y el decodificador necesita
-// digitos decimales. La division entre diez tiene divisor constante y el
-// rango esta acotado a 0..60, de modo que la sintesis la resuelve con una
-// red pequena de LUTs y no con un divisor real. Si resultara costosa, la
-// alternativa es que el temporizador cuente directamente en BCD.
-//
-// La tabla de segmentos se escribe con la convencion de que uno significa
-// encendido, y la inversion se aplica al final con SEG_ACTIVE_LEVEL. Asi
-// la tabla del codigo y la de la documentacion son la misma y no hay que
-// razonar dos veces sobre la polaridad.
+// Las tablas de segmentos y de anodos se manejan con 1 = encendido para
+// que sean mas faciles de leer. La polaridad real de la tarjeta se
+// aplica al final.
 // =====================================================================
 
 module display_controller #(
@@ -42,7 +31,7 @@ module display_controller #(
     input  logic [6:0] time_s_i,     // segundos restantes, 0..60
     input  logic [7:0] wins_bcd_i,   // victorias en BCD, dos digitos
     output logic [6:0] seg_o,        // {g,f,e,d,c,b,a}
-    output logic [7:0] an_o
+    output logic [7:0] an_o          // habilitacion de cada digito
 );
 
     logic [1:0] dig_q = 2'd0;
@@ -50,42 +39,42 @@ module display_controller #(
     logic [6:0] seg;
     logic [7:0] an;
 
-    // ---- contador de digito ----
+    // Este contador indica cual de los cuatro digitos se esta
+    // mostrando. Como solo tiene dos bits, despues del digito 3 vuelve
+    // automaticamente al 0.
     always_ff @(posedge clk_i) begin
         if (rst_i)       dig_q <= 2'd0;
         else if (tick_i) dig_q <= dig_q + 2'd1;
     end
 
-    // ---- conversion de segundos a dos digitos decimales ----
-    // El cociente y el residuo se calculan con el ancho completo y se
-    // rebanan de forma explicita. Evita el cast de una expresion variable,
-    // que no todos los simuladores aceptan, y deja el truncamiento a la
-    // vista en vez de implicito.
+    // El tiempo llega como un numero binario, pero para mostrarlo en
+    // el display necesitamos separar las decenas de las unidades.
     logic [6:0] cociente;
     logic [3:0] residuo;
 
     assign cociente = time_s_i / 7'd10;
 
-    // El residuo de dividir entre diez esta siempre entre 0 y 9, asi que
-    // cabe en cuatro bits. El truncamiento es intencional y se declara
-    // aqui en vez de arrastrar tres bits que nunca valen nada.
+    // El residuo de dividir entre 10 siempre esta entre 0 y 9, por lo
+    // que cuatro bits son suficientes para guardarlo.
     /* verilator lint_off WIDTHTRUNC */
     assign residuo = time_s_i % 7'd10;
     /* verilator lint_on WIDTHTRUNC */
 
-    // El temporizador nunca pasa de 60, pero la entrada admite hasta 127.
-    // Un valor de dos digitos que no cabe se muestra apagado en lugar de
-    // mostrar una cifra equivocada.
+    // Normalmente el tiempo esta entre 0 y 60. Si por alguna razon
+    // llega un valor que necesita mas de dos digitos, se manda un valor
+    // invalido para que el decodificador apague ese digito.
     assign t_dec = (cociente > 7'd9) ? 4'hF : cociente[3:0];
     assign t_uni = residuo;
 
-    // ---- multiplexor de nibble ----
-    // Los dos digitos del contador se separan con asignaciones continuas:
-    // iverilog no admite selecciones constantes dentro de un always.
+    // Las victorias ya vienen en BCD, asi que solo se separan las
+    // unidades y las decenas para poder mostrarlas por separado.
     logic [3:0] win_uni, win_dec;
     assign win_uni = wins_bcd_i[3:0];
     assign win_dec = wins_bcd_i[7:4];
 
+    // Dependiendo del turno se escoge el numero que se va a mostrar.
+    // Asi, aunque todos los digitos comparten las mismas lineas de
+    // segmentos, cada uno puede mostrar un valor diferente.
     always_comb begin
         unique case (dig_q)
             2'd0:    nibble = win_uni;
@@ -96,8 +85,8 @@ module display_controller #(
         endcase
     end
 
-    // ---- decodificador BCD a siete segmentos ----
-    //      seg = {g, f, e, d, c, b, a}, uno = encendido
+    // Tabla para convertir el numero recibido en los segmentos que
+    // deben encenderse. Los bits estan en el orden {g,f,e,d,c,b,a}.
     always_comb begin
         unique case (nibble)
             4'd0:    seg = 7'b0111111;
@@ -110,25 +99,28 @@ module display_controller #(
             4'd7:    seg = 7'b0000111;
             4'd8:    seg = 7'b1111111;
             4'd9:    seg = 7'b1101111;
-            default: seg = 7'b0000000;   // fuera de rango: digito apagado
+            // Cualquier otro valor se considera invalido y se apagan
+            // todos los segmentos.
+            default: seg = 7'b0000000;
         endcase
     end
 
-    // ---- decodificador de anodo, 2 a 8 ----
-    // Escrito como tabla y no como an[dig_q]=1 para que el ancho del
-    // indice no dependa del tamano del vector, y para que se lea como el
-    // decodificador que es. AN4..AN7 nunca se activan.
+    // Aqui se indica cual de los digitos esta activo. Las victorias van
+    // en AN0 y AN1 y los segundos en AN4 y AN5, asi que cada cantidad
+    // queda en un bloque distinto. Los otros cuatro quedan apagados.
     always_comb begin
         unique case (dig_q)
-            2'd0:    an = 8'b0000_0001;
-            2'd1:    an = 8'b0000_0010;
-            2'd2:    an = 8'b0000_0100;
-            2'd3:    an = 8'b0000_1000;
+            2'd0:    an = 8'b0000_0001;   // AN0, unidades de victorias
+            2'd1:    an = 8'b0000_0010;   // AN1, decenas de victorias
+            2'd2:    an = 8'b0001_0000;   // AN4, unidades de segundos
+            2'd3:    an = 8'b0010_0000;   // AN5, decenas de segundos
             default: an = 8'b0000_0000;
         endcase
     end
 
-    // ---- aplicacion de polaridad ----
+    // Internamente usamos 1 = encendido. Aqui se cambia la señal a la
+    // polaridad que necesita la tarjeta, tanto para los segmentos como
+    // para los anodos.
     assign seg_o = SEG_ACTIVE_LEVEL ? seg : ~seg;
     assign an_o  = AN_ACTIVE_LEVEL  ? an  : ~an;
 

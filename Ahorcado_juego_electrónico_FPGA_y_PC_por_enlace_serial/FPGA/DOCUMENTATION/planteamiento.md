@@ -1178,10 +1178,18 @@ contador dedicado.
 |---|---|---|
 | 0 | AN0 | unidades de victorias |
 | 1 | AN1 | decenas de victorias |
-| 2 | AN2 | unidades de segundos |
-| 3 | AN3 | decenas de segundos |
+| 2 | AN4 | unidades de segundos |
+| 3 | AN5 | decenas de segundos |
 
-`AN7` a `AN4` se mantienen inactivos de forma permanente.
+Los ocho dígitos de la tarjeta forman dos bloques de cuatro separados por un
+hueco. Las dos cantidades se reparten una a cada bloque, ambas pegadas a ese
+hueco. Con los cuatro dígitos seguidos en un mismo bloque, las victorias y los
+segundos se leían como un solo número de cuatro cifras, que es justo lo que esta
+distribución evita. `AN2`, `AN3`, `AN6` y `AN7` se mantienen inactivos de forma
+permanente.
+
+El reparto no afecta la frecuencia de barrido: siguen siendo cuatro dígitos por
+vuelta, uno por milisegundo.
 
 **Conversión del tiempo a BCD.** El temporizador entrega los segundos en binario,
 de 0 a 60, mientras que el decodificador necesita dígitos decimales por separado.
