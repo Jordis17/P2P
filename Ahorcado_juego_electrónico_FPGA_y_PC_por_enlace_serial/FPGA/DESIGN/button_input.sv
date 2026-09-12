@@ -1,30 +1,17 @@
 // =====================================================================
 // button_input.sv - Acondicionamiento de un pulsador
 //
-//   btn_i --> sincronizador 2 FF --> filtro de rebotes --> flanco
+// El boton pasa por tres etapas antes de usarse en el resto del
+// sistema: primero se sincroniza con el reloj, luego se espera a que
+// la señal se mantenga estable para evitar los rebotes y finalmente
+// se genera un pulso cuando se detecta una nueva pulsacion.
 //
-// Tres etapas, cada una resolviendo un problema distinto:
+// Internamente se trabaja con 1 = boton presionado, sin importar si
+// el boton fisico trabaja con logica activa en alto o en bajo.
 //
-// 1. Sincronizador. El pulsador cambia en cualquier instante respecto al
-//    reloj, asi que puede violar los tiempos de establecimiento del
-//    primer flip-flop y dejarlo metaestable. El segundo le da un ciclo
-//    completo para resolverse.
-//
-// 2. Filtro de rebotes. Los contactos mecanicos oscilan durante unos
-//    pocos milisegundos. El contador solo avanza mientras la entrada
-//    sincronizada difiere del nivel estable; cualquier oscilacion lo
-//    devuelve a cero. Solo un nivel sostenido durante DEBOUNCE_MS
-//    completos consigue cambiar el estado.
-//
-// 3. Detector de flanco. Sin el, la FSM veria el boton presionado
-//    durante millones de ciclos y cambiaria de modo miles de veces con
-//    una sola pulsacion.
-//
-// La polaridad se normaliza en la entrada, de modo que internamente uno
-// siempre significa presionado.
-//
-// Los registros declaran valor inicial para que el modulo arranque en un
-// estado conocido tras la configuracion, sin depender del reset.
+// Se instancia tres veces, una por cada boton del juego. El reinicio
+// usa el nivel filtrado y los otros dos usan el pulso, por eso el
+// modulo entrega las dos formas.
 // =====================================================================
 
 module button_input #(
@@ -36,9 +23,12 @@ module button_input #(
     input  logic tick_i,     // pulso de 1 ms
     input  logic btn_i,      // entrada fisica, asincrona
     output logic pulse_o,    // un ciclo por pulsacion
-    output logic level_o     // nivel ya filtrado
+    output logic level_o     // nivel ya filtrado (1 = presionado)
 );
 
+    // Bits necesarios para contar hasta DEBOUNCE_MS. El caso de 1 o
+    // menos se aparta porque $clog2(1) da cero, y un vector de cero
+    // bits no es valido.
     localparam int W = (DEBOUNCE_MS <= 1) ? 1 : $clog2(DEBOUNCE_MS);
 
     logic         btn_norm;
@@ -48,36 +38,51 @@ module button_input #(
     logic         stable_d = 1'b0;
     logic [W-1:0] cnt_q    = '0;
 
-    // Normalizacion de polaridad: a partir de aqui 1 = presionado
+    // Desde este punto ya no importa si el boton original era activo
+    // en alto o en bajo: un 1 siempre representa que esta presionado.
     assign btn_norm = (btn_i == BTN_ACTIVE_LEVEL);
 
     assign level_o = stable_q;
-    assign pulse_o = stable_q & ~stable_d;   // solo flanco de subida
+    assign pulse_o = stable_q & ~stable_d;
 
-    // Etapa 1: sincronizador de dos etapas
+    // El boton cambia en cualquier momento respecto al reloj, asi que
+    // el primer flip-flop puede quedar metaestable si el cambio le cae
+    // justo encima del flanco. El segundo le da un ciclo completo para
+    // que se resuelva, y es su salida la que usa el resto del modulo.
     always_ff @(posedge clk_i) begin
         sync_q1 <= btn_norm;
         sync_q2 <= sync_q1;
     end
 
-    // Etapa 2: filtro de rebotes
+    // Despues de sincronizar, se comprueba que el cambio se mantenga
+    // durante el tiempo definido. Esto evita tomar como una pulsacion
+    // los cambios rapidos que produce el rebote del boton.
     always_ff @(posedge clk_i) begin
         if (rst_i) begin
             cnt_q    <= '0;
             stable_q <= 1'b0;
         end else if (sync_q2 == stable_q) begin
-            cnt_q    <= '0;                  // sin desacuerdo, se reinicia
+            // Si la señal regreso al estado que ya considerabamos
+            // estable, no hay nada que contar.
+            cnt_q <= '0;
         end else if (tick_i) begin
+            // Se cuenta una vez por cada tick de 1 ms. Como la pulsacion
+            // puede caer en cualquier punto entre dos ticks, el filtro
+            // termina durando entre 9 y 10 ms y no 10 exactos.
             if (cnt_q == W'(DEBOUNCE_MS - 1)) begin
-                stable_q <= sync_q2;         // desacuerdo sostenido, se adopta
+                // El cambio se mantuvo el tiempo suficiente, asi que
+                // ahora si lo aceptamos como un nuevo estado del boton.
+                stable_q <= sync_q2;
                 cnt_q    <= '0;
             end else begin
-                cnt_q    <= cnt_q + 1'b1;
+                cnt_q <= cnt_q + 1'b1;
             end
         end
     end
 
-    // Etapa 3: retardo de un ciclo para detectar el flanco
+    // Se guarda el estado estable del ciclo anterior. Al comparar
+    // stable_q con stable_d se obtiene un solo ciclo de pulso cuando
+    // el boton pasa de soltado a presionado.
     always_ff @(posedge clk_i) begin
         if (rst_i) stable_d <= 1'b0;
         else       stable_d <= stable_q;
