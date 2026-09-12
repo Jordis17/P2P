@@ -46,8 +46,8 @@ El proyecto de Vivado no se versiona: es un artefacto generado. Las fuentes son
 | Integrante | Bloque | Módulos |
 |---|---|---|
 | Mariana Fallas Fallas | Núcleo del juego | `game_controller`, `lfsr`, `round_timer`, `word_rom` |
-| Abner López Méndez | Subsistema LCD | `lcd_controller`, `lcd_peripheral`, `lcd_screen_ctrl` |
-| Justin Garita Serrano | UART y aplicación de PC | `uart_peripheral`, `uart_msg`, `uart_test_block`, terminal |
+| Abner López Méndez | Subsistema LCD | `lcd_controller`, `lcd_peripheral`, `lcd_screen_ctrl` y sus tres internos, `lcd_screen_pkg` |
+| Justin Garita Serrano | UART y aplicación de PC | `uart_core`, `uart_peripheral`, `uart_msg` y sus dos internos, `uart_test_block`, terminal |
 | Jordi Segura Chinchilla | Periféricos locales e integración | `clk_tick_gen`, `button_input`, `display_controller`, `buzzer_controller`, `led_controller`, `top`, restricciones |
 
 Cada quien es dueño de sus módulos y de sus testbenches.
@@ -61,8 +61,7 @@ Cada quien es dueño de sus módulos y de sus testbenches.
 | Xilinx Vivado | 2019.2 o superior | síntesis, implementación, simulación |
 | Digilent Nexys 4 | rev. B | implementación física |
 | PmodCLP | rev. B, 3.3 V | LCD 16×2, controlador Samsung KS0066 |
-| Python | 3.8 o superior | terminal, generador del banco y script de regresión |
-| Icarus Verilog | 11 o superior | regresión de testbenches fuera de Vivado (opcional) |
+| Python | 3.8 o superior | aplicación de terminal y generador del banco |
 | pyserial | `pip install pyserial` | comunicación UART desde la PC |
 
 Se necesita además un altavoz amplificado o audífonos en el jack de 3.5 mm: la
@@ -79,7 +78,7 @@ media fila de otro:
 | PmodCLP | Señales | Conector |
 |---|---|---|
 | J1, 12 pines | `DB0`–`DB7` | JA completo |
-| J2, 6 pines | `RS`, `R/W`, `E` | JB1–JB3 |
+| J2, 6 pines | `RS`, `R/W`, `E` | JB7–JB9, fila inferior del JB |
 
 | Botón | Función |
 |---|---|
@@ -114,23 +113,25 @@ el slack, la frecuencia máxima y que no se hayan inferido latches.
 
 Los testbenches de `FPGA/SIMULATION` son autoverificables: comprueban los
 resultados y terminan con un resumen de PASS/FAIL, sin necesidad de inspeccionar
-formas de onda.
+formas de onda. Hay uno por módulo con lógica propia, más `tb_top`, que juega una
+partida completa mirando solo las patas del LCD y la línea serie.
 
-```bash
-cd Ahorcado_juego_electrónico_FPGA_y_PC_por_enlace_serial/FPGA/SIMULATION
-python run_tests.py            # los dieciséis testbenches
-python run_tests.py lcd        # solo los del LCD
-python run_tests.py --lint     # además revisa el RTL con verilator
+Se corren en el simulador de Vivado eligiendo cuál es el tope de la simulación:
+
+```tcl
+set_property top tb_word_rom [get_filesets sim_1]
+launch_simulation
 ```
 
-El núcleo UART es VHDL e iverilog no lo compila, así que esta regresión corre
-contra el modelo de comportamiento. Por eso hay dos archivos que declaran
-`uart_core`: el de `DESIGN` instancia las entidades VHDL y es el que usa Vivado,
-y `SIMULATION/uart_core_sim.sv` resuelve lo mismo con el modelo. Nunca se
-compilan juntos; el script arma la lista de fuentes excluyendo el que no toca.
+`lcd_screen_pkg.sv` tiene que estar agregado al proyecto, porque los módulos del
+LCD lo importan. Vivado resuelve el orden de compilación por su cuenta.
 
-La simulación contra el núcleo real se hace en Vivado, que sí entiende lenguaje
-mixto.
+`uart_core_model.sv` es un modelo de comportamiento de la línea serie que
+instancian `tb_uart_msg`, `tb_uart_peripheral` y `tb_uart_test_block` como
+extremo opuesto del cable, para no depender de una PC durante la simulación.
+
+`tb_top` es el único que necesita el núcleo UART en VHDL, porque instancia `top`
+completo. Vivado entiende lenguaje mixto, así que corre sin nada aparte.
 
 La simulación post-implementación temporizada se corre sobre una variante con las
 constantes de tiempo reducidas, para que el arranque del LCD y las tramas UART

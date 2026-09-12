@@ -106,9 +106,9 @@ partidas ganadas acumuladas, un LED indica en qué etapa está el sistema, y el
 amplificador de audio produce tonos distintos para acierto, error, victoria y
 derrota.
 
-La razón de concentrar todo en la tarjeta no es solo de enunciado: mantener el
-estado del juego en un único lugar elimina la posibilidad de que la computadora y
-la FPGA discrepen sobre qué letras se han jugado o cuánto tiempo queda.
+Concentrar todo en la tarjeta tiene además una razón propia: mantener el estado
+del juego en un único lugar elimina la posibilidad de que la computadora y la FPGA
+discrepen sobre qué letras se han jugado o cuánto tiempo queda.
 
 ---
 
@@ -357,7 +357,7 @@ flowchart LR
     LC -.->|busy, done| LP
     LC -->|"db 8 + rs, rw, e"| PMOD["PmodCLP"]
 
-    GC -->|"ev_id 2 + datos"| UMT["uart_msg<br/>ROM de plantillas + serializador"]
+    GC -->|"ev_id 2 + datos"| UMT["uart_msg"]
     UMT -.->|busy| GC
     UMT -->|"rx_letter 8, rx_valid"| GC
     UMT -->|"we, addr 2, wdata 32"| UP["uart_peripheral<br/>registros de 32 bits"]
@@ -407,6 +407,42 @@ solo `lcd_screen_ctrl` tiene máquina de estados. Las constantes que comparten
 —códigos de pantalla, mapa de registros del periférico y ancho de la pantalla—
 están en `lcd_screen_pkg`.
 
+### 3.2.2 Por dentro de la capa de protocolo
+
+La cadena del UART tiene el mismo problema que la del LCD, con otra forma.
+Notificar un evento son hasta tres líneas de texto y unos treinta y cinco bytes,
+cada uno con su escritura de registro y su espera, y decidir qué carácter sale en
+cada posición mezcla tres asuntos: qué datos de la jugada se están reportando,
+cuál es el formato de la línea que toca, y cómo se le entrega cada byte al
+periférico. `uart_msg` se queda con el último y reparte los otros dos.
+
+```mermaid
+flowchart LR
+    IN["de game_controller<br/>ev_id 2 + datos"] --> UM
+    UM["uart_msg<br/>FSM del bus + recorrido de<br/>lineas y posiciones"]
+    UM -.->|"capture, al aceptar la orden"| SNAP["uart_msg_snapshot<br/>copia estable de los datos"]
+    UM -->|"linea 2 + posicion 5"| CGEN["uart_msg_char_gen"]
+    SNAP -->|"palabra, patron, letra,<br/>errores, modo, desenlace"| CGEN
+    CGEN -->|"caracter 8"| UM
+    CGEN -->|"ultimo indice 5,<br/>lineas del evento 2"| UM
+    UM -->|"interfaz de 32 bits"| UP["a uart_peripheral"]
+```
+
+La copia registrada existe por lo mismo que en el LCD: emitir la secuencia larga
+tarda unos tres milisegundos, y sin ella una trama podría salir con la letra de
+una jugada y el patrón de la siguiente.
+
+El generador devuelve, además del carácter, cuántas líneas tiene el evento y cuál
+es el último índice de la línea actual. Esas dos señales son lo único que la
+máquina de estados necesita saber del formato, así que el recorrido no depende de
+cómo estén escritos los mensajes.
+
+De los tres módulos, uno es combinacional puro —`uart_msg_char_gen`—, otro es un
+banco de registros con una sola condición de carga, y solo `uart_msg` tiene
+máquina de estados. Acá no hizo falta un paquete de constantes: los códigos ASCII
+y los prefijos los usa solo el generador, y el mapa de registros del periférico
+solo la máquina de estados.
+
 ## 3.3 Composición funcional de cada módulo
 
 | Módulo | Elementos funcionales |
@@ -423,7 +459,9 @@ están en `lcd_screen_pkg`.
 | `lcd_text_gen` | ROM de textos fijos, mux de fuente de carácter, conversor de binario a ASCII, armado del patrón y de la palabra |
 | `lcd_peripheral` | tres registros de 32 bits, decodificador de dirección, mux de lectura 4:1, lógica de set y clear por bit |
 | `lcd_controller` | FSM de inicialización y escritura, contador de espera de 18 bits, registros de salida |
-| `uart_msg` | ROM de plantillas, contador de byte, mux de fuente, conversor de binario a ASCII, comparador de rango A-Z, FSM de transmisión y recepción |
+| `uart_msg` | FSM de siete estados para el diálogo con el periférico, contador de línea de 2 bits, contador de posición de 5 bits, comparador de rango A-Z |
+| `uart_msg_snapshot` | nueve registros con carga condicionada por un pulso |
+| `uart_msg_char_gen` | ROM de prefijos, mux de fuente de carácter, conversor de binario a ASCII, armado del patrón y de la palabra, comparadores sobre la posición |
 | `uart_core` | envoltura del núcleo VHDL: biestable de petición sostenida y generación del nivel de ocupado |
 | `uart_peripheral` | tres registros de 32 bits, decodificador de dirección, mux de lectura, biestables de `send` y `new_rx` |
 | `display_controller` | contador de dígito de 2 bits, mux 4:1 de nibbles, decodificador BCD a siete segmentos, decodificador de ánodo |
