@@ -32,6 +32,9 @@ top
 ├── lfsr                  generador de 8 bits
 ├── round_timer           cuenta regresiva
 ├── lcd_screen_ctrl  →  lcd_peripheral  →  lcd_controller  →  PmodCLP
+│    ├── lcd_screen_snapshot  copia estable de los datos de la partida
+│    ├── lcd_step_decoder     del número de paso a comando, fila y columna
+│    └── lcd_text_gen         el byte que va en cada posición
 ├── uart_msg         →  uart_peripheral →  uart_core       →  PC
 ├── uart_test_block       pruebas del UART, se activa por parámetro
 ├── display_controller
@@ -397,6 +400,42 @@ Un redibujado completo son 2 comandos más 32 caracteres, unos 2 ms.
 Los 3 segundos del resultado se cuentan desde que termina el redibujado, no desde
 que se entra al estado, para que se vean 3 segundos completos.
 
+### Cómo está partida la capa de presentación
+
+`lcd_screen_ctrl` empezó siendo un único módulo que hacía cuatro cosas a la vez:
+copiar los datos de la partida, llevar la cuenta del paso, decidir qué carácter
+toca en cada posición y dialogar con el periférico. Funcionaba, pero costaba
+seguirlo y cualquier cambio en los textos obligaba a leer también la máquina de
+estados.
+
+Ahora esas responsabilidades están en cuatro archivos:
+
+| Módulo | De qué se encarga | Tipo |
+|---|---|---|
+| `lcd_screen_ctrl` | la máquina de estados que habla con el periférico y el contador de paso | secuencial |
+| `lcd_screen_snapshot` | registra los datos de la partida al aceptar la orden | secuencial |
+| `lcd_step_decoder` | traduce el número de paso a comando, fila y columna | combinacional |
+| `lcd_text_gen` | arma el byte que va en esa fila y columna | combinacional |
+
+Las constantes que comparten viven en `lcd_screen_pkg`: los códigos de pantalla,
+el mapa de registros del periférico y el ancho de la pantalla.
+
+El reparto deja cada pieza con una sola razón para cambiar. Los textos se editan
+en `lcd_text_gen` sin abrir la máquina de estados; la aritmética del paso se
+comprueba leyendo doce líneas; y el diálogo con el periférico queda reducido a
+cinco estados sin nada de armado de texto en medio.
+
+La interfaz externa no cambió: `top` instancia `lcd_screen_ctrl` con los mismos
+puertos que antes, y ni el periférico ni el `game_controller` notan la
+diferencia.
+
+**Una consecuencia práctica del paquete.** iverilog compila en el orden en que se
+le pasan los archivos y necesita el paquete antes que cualquier módulo que lo
+importe. Por orden alfabético `lcd_screen_ctrl.sv` cae antes de
+`lcd_screen_pkg.sv`, así que `run_tests.py` pone los paquetes al principio de la
+lista a propósito. Vivado resuelve esa dependencia por su cuenta, pero el
+paquete tiene que estar agregado al proyecto.
+
 ---
 
 ## 10. UART
@@ -744,9 +783,25 @@ validación de una letra, y prueba física.
 
 ### Estado actual
 
-Los dieciséis módulos tienen testbench propio con resumen PASS/FAIL, y los
-dieciséis pasan. Los archivos de `DESIGN` compilan sin avisos bajo
-`verilator --lint-only -Wall`.
+Hay dieciséis testbenches con resumen PASS/FAIL, y los dieciséis pasan. El RTL
+compila sin un solo aviso bajo `verilator --lint-only -Wall`, tanto módulo por
+módulo como el sistema completo.
+
+Conviene decir con precisión qué cubre cada cosa, porque hay más módulos que
+testbenches. Los tres módulos en que se partió la capa de presentación del LCD
+—`lcd_screen_snapshot`, `lcd_step_decoder` y `lcd_text_gen`— no tienen testbench
+propio: se verifican a través de `tb_lcd_screen_ctrl`, que compara los treinta y
+dos caracteres de cada una de las seis pantallas, carácter por carácter, y por
+tanto ejercita los tres de punta a punta. Dos de ellos son combinacionales puros
+y el tercero es un banco de registros con una sola condición de carga, así que un
+testbench propio repetiría lo que la prueba de nivel superior ya comprueba.
+
+Al hacer ese reparto se comprobó además, con un `miter` y un solver SAT, que la
+versión nueva de `lcd_screen_ctrl` y la anterior responden igual: no existe
+ninguna secuencia de entradas, con cualquier combinación de `busy` y `done`, que
+haga diferir sus salidas durante los primeros 25 ciclos. Esa comprobación alcanza
+los primeros seis de los treinta y cuatro pasos; el recorrido completo de las
+seis pantallas lo cubre el testbench, no la demostración formal.
 
 La terminal de PC también tiene su prueba, con el mismo criterio y sin necesidad
 de la tarjeta: `PYTHON/SIMULATION/test_terminal.py` juega una partida completa
@@ -775,5 +830,113 @@ La regresión se corre con `python run_tests.py` desde `FPGA/SIMULATION`, o con
 `--lint` para revisar además el RTL con verilator.
 
 Falta correr las mismas pruebas en Vivado contra el núcleo real en VHDL y
-comparar los resultados con los del modelo. Hasta que eso esté hecho, lo
-verificado es la lógica del sistema, no la integración con el núcleo.
+comparar sus resultados con los del modelo. La integración con el núcleo real sí
+está comprobada sobre la tarjeta, como se cuenta más abajo; lo que falta es la
+comparación lado a lado en simulación, que es la que diría si el modelo y el
+núcleo se comportan igual ante los mismos estímulos.
+
+---
+
+## 17. Resultados de síntesis e implementación
+
+Vivado, dispositivo `xc7a100t` de la Nexys 4, reloj de 100 MHz declarado con
+`create_clock -period 10.000`.
+
+### Síntesis
+
+| | |
+|---|---|
+| LUTs | 902 de 63 400 · 1,42 % |
+| Registros | 632 de 126 800 · 0,50 % |
+| **Registros inferidos como latch** | **0** |
+| Errores | 0 |
+| Avisos críticos | 0 |
+| Avisos | 143 |
+
+Que los 632 registros sean flip-flops y ninguno latch es la comprobación que
+importa de toda la tabla: confirma que no quedó ningún `always_comb` con una rama
+sin asignar.
+
+Los 143 avisos son tres grupos, y los tres se esperan:
+
+| Cantidad | Aviso | Motivo |
+|---|---|---|
+| 100 | `Synth 8-7129` | bits del bus de 32 bits que los periféricos no usan, porque la interfaz es de 32 bits por convenio y cada registro ocupa unos pocos |
+| 12 | `Synth 8-3917` | LED 3 al 14 amarrados a cero: se restringen los dieciséis para que Vivado genere el bitstream, aunque el juego use cuatro |
+| 3 | `Synth 8-3332` | la máquina de `uart_test_block` se elimina porque `MODO_PRUEBA_UART` está apagado |
+
+### Implementación
+
+| | |
+|---|---|
+| LUTs tras colocar | 887 · 1,40 % |
+| Registros | 632 · 0,50 % |
+| Pines | 50 de 210 · 23,81 % |
+| WNS, holgura de establecimiento | **+1,813 ns** · 0 caminos fallando de 1430 |
+| WHS, holgura de mantenimiento | **+0,134 ns** · 0 caminos fallando de 1430 |
+| WPWS, ancho de pulso | +4,500 ns · 0 fallando de 633 |
+| Ruteo | 1417 de 1417 conexiones, 0 errores |
+| DRC y metodología | sin violaciones |
+| Avisos de implementación | 0 |
+
+El timing cierra con 1,813 ns de margen sobre un período de 10 ns. Dicho de otra
+forma, el camino más lento tarda 8,187 ns, así que el diseño toleraría un reloj de
+unos 122 MHz antes de empezar a fallar. La holgura de mantenimiento es positiva,
+que es lo que hay que mirar para descartar problemas que no se arreglan bajando la
+frecuencia.
+
+El diseño ocupa menos del 1,5 % de la tarjeta. No hubo que pelear con recursos en
+ningún momento, lo que era de esperar: el juego es sobre todo control, y la
+memoria más grande es la ROM de 64 palabras.
+
+### Bitstream
+
+`write_bitstream` termina con 0 errores y 0 avisos, y el DRC previo con 0 errores.
+
+---
+
+## 18. Puesta en marcha y prueba física
+
+El orden de abajo está pensado para que, si algo falla, el síntoma diga en qué
+bloque está el problema, en vez de dejar todo el sistema como sospechoso.
+
+**1. Antes de energizar.** J1 del PmodCLP al conector JA completo y J2 a la fila
+de abajo del JB, comprobando la marca del pin 1 en los dos. Un Pmod corrido una
+posición no produce ningún error visible: simplemente no funciona.
+
+**2. Programar y mirar el LCD.** Si aparece la pantalla de selección, eso valida
+de golpe el reloj, la secuencia de arranque del LCD, el periférico y la capa de
+presentación. Si queda en blanco o con bloques negros, el problema es de
+cableado y no hay que seguir.
+
+**3. Probar sin la PC.** El botón izquierdo alterna Fácil y Difícil, con el LED 15
+siguiendo el cambio; el derecho arranca la partida y enciende el LED 1; los
+displays cuentan los segundos hacia atrás desde 60 o 45; el central reinicia.
+Dejando vencer el tiempo sin tocar nada debe salir `PERDISTE: TIEMPO` durante tres
+segundos y volver solo a la selección. Todo esto es independiente del enlace
+serial.
+
+**4. Conectar la terminal.** Con `python ahorcado_terminal.py --list` se localiza
+el puerto y con `--port COMn` se abre. Al pulsar el botón derecho deben llegar las
+líneas `START:`, `PATT:` y `ERR:`. Si el LCD arranca la partida pero por el serial
+no llega nada, el problema queda acotado al camino UART.
+
+Un detalle que cuesta un rato si no se sabe: Windows no comparte los puertos
+serie. Si otro programa tiene el puerto abierto —una consola, el monitor serie de
+otro entorno— la terminal falla con `Access is denied`. El Hardware Manager de
+Vivado no estorba, porque la tarjeta expone el JTAG y el serial como interfaces
+distintas del mismo cable.
+
+**5. Jugar una partida completa,** comprobando los cuatro casos: letra correcta,
+letra incorrecta, letra repetida y fin de partida, y que el LCD y la terminal
+cuenten siempre lo mismo.
+
+### Resultado
+
+El sistema completo funciona sobre la tarjeta: se juega desde la terminal de
+Python y el LCD, los displays y los LEDs acompañan. Con eso queda comprobada en
+hardware la integración con el núcleo UART en VHDL, que es la parte que la
+regresión con iverilog no puede cubrir porque sustituye el núcleo por un modelo.
+
+Las fotografías de las tres pantallas, la captura de una partida en la terminal y
+la del montaje están en `DOCUMENTATION/FIGURAS`.

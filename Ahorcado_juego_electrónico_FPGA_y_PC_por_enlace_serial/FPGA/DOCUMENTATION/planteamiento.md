@@ -348,7 +348,7 @@ flowchart LR
 
 ```mermaid
 flowchart LR
-    GC["game_controller"] -->|"screen_id 3 + datos"| LSC["lcd_screen_ctrl<br/>ROM de textos + secuenciador"]
+    GC["game_controller"] -->|"screen_id 3 + datos"| LSC["lcd_screen_ctrl<br/>capa de presentacion, ver 3.2.1"]
     LSC -.->|busy| GC
     LSC -->|"we, addr 2, wdata 32"| LP["lcd_peripheral<br/>registros de 32 bits"]
     LP -->|"rdata 32"| LSC
@@ -377,6 +377,36 @@ flowchart LR
     BUZZ -->|aud_pwm, aud_sd| SA["Amplificador"]
 ```
 
+### 3.2.1 Por dentro de la capa de presentación del LCD
+
+Dibujar una pantalla son treinta y cuatro transacciones, y decidir cuál toca en
+cada una mezcla cuatro asuntos distintos: qué datos de la partida se están
+pintando, en qué paso va la secuencia, qué carácter corresponde a esa posición y
+cómo se le pide todo eso al periférico. `lcd_screen_ctrl` se queda solo con el
+último, y reparte los otros tres.
+
+```mermaid
+flowchart LR
+    IN["de game_controller<br/>screen_id 3 + datos"] --> LSC
+    LSC["lcd_screen_ctrl<br/>FSM del bus + contador de paso"]
+    LSC -.->|"capture, al aceptar la orden"| SNAP["lcd_screen_snapshot<br/>copia estable de los datos"]
+    LSC -->|"paso 6"| STEP["lcd_step_decoder"]
+    STEP -->|"es_comando, fila, col 4"| TGEN["lcd_text_gen"]
+    SNAP -->|"palabra, patron, errores,<br/>modo, victorias"| TGEN
+    TGEN -->|"byte 8 + rs"| LSC
+    LSC -->|"interfaz de 32 bits"| LP["a lcd_peripheral"]
+```
+
+La copia registrada existe porque un redibujado dura milisegundos: sin ella, un
+cambio en los datos a mitad de camino dejaría la fila de arriba con información
+vieja y la de abajo con la nueva.
+
+De los cuatro módulos, dos son combinacionales puros —`lcd_step_decoder` y
+`lcd_text_gen`—, uno es un banco de registros con una sola condición de carga y
+solo `lcd_screen_ctrl` tiene máquina de estados. Las constantes que comparten
+—códigos de pantalla, mapa de registros del periférico y ancho de la pantalla—
+están en `lcd_screen_pkg`.
+
 ## 3.3 Composición funcional de cada módulo
 
 | Módulo | Elementos funcionales |
@@ -387,7 +417,10 @@ flowchart LR
 | `word_rom` | ROM combinacional de 64 × 100 bits, decodificador de índice de 6 bits |
 | `round_timer` | contador de ms módulo 1000, contador descendente de segundos de 7 bits, comparador con cero, mux del valor inicial |
 | `game_controller` | ver 3.4 y 3.5 |
-| `lcd_screen_ctrl` | ROM de textos fijos, contador de posición de 5 bits, mux de fuente de carácter, FSM |
+| `lcd_screen_ctrl` | FSM de cinco estados para el diálogo con el periférico, contador de paso de 6 bits |
+| `lcd_screen_snapshot` | siete registros con carga condicionada por un pulso |
+| `lcd_step_decoder` | comparadores sobre el número de paso, resta de 4 bits con envolvimiento |
+| `lcd_text_gen` | ROM de textos fijos, mux de fuente de carácter, conversor de binario a ASCII, armado del patrón y de la palabra |
 | `lcd_peripheral` | tres registros de 32 bits, decodificador de dirección, mux de lectura 4:1, lógica de set y clear por bit |
 | `lcd_controller` | FSM de inicialización y escritura, contador de espera de 18 bits, registros de salida |
 | `uart_msg` | ROM de plantillas, contador de byte, mux de fuente, conversor de binario a ASCII, comparador de rango A-Z, FSM de transmisión y recepción |
@@ -685,7 +718,10 @@ flowchart LR
 Este plano reúne los dieciséis módulos que instancia el bloque superior y todas
 las señales que los conectan. No aparece `uart_test_block`, que sustituye a la
 capa de protocolo como maestro del periférico UART cuando se activa el modo de
-prueba por parámetro; en síntesis solo queda uno de los dos. Las
+prueba por parámetro; en síntesis solo queda uno de los dos. Tampoco aparecen los
+tres módulos internos de `lcd_screen_ctrl`, porque no los instancia el bloque
+superior sino la propia capa de presentación; están en el diagrama de 3.2 y en la
+tabla de 3.3. Las
 líneas continuas llevan datos con su ancho indicado, las punteadas llevan
 control, y las flechas dobles representan la interfaz estándar de registros de
 32 bits, que en ambos sentidos son `write_enable`, `addr`, `wdata` y `rdata`.
