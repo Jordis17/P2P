@@ -84,10 +84,8 @@ module top #(
     // Cada boton entrega las dos formas, el nivel y el pulso, pero cada
     // uno usa solo la que le sirve. El reinicio se toma como nivel y los
     // otros dos como eventos, asi que la otra salida se deja sin conectar.
-    /* verilator lint_off UNUSEDSIGNAL */
     logic rst, rst_pulso;
     logic btn_sel, btn_ok, nivel_sel, nivel_ok;
-    /* verilator lint_on UNUSEDSIGNAL */
 
     // El filtro del boton de reinicio no puede depender del reinicio, por
     // eso este es el unico que recibe un cero fijo.
@@ -281,9 +279,7 @@ module top #(
         .aud_pwm_o(aud_pwm_o), .aud_sd_o(aud_sd_o),
         // La politica de solapamiento de sonidos vive dentro del propio
         // modulo, asi que nadie necesita saber si esta sonando algo.
-        /* verilator lint_off PINCONNECTEMPTY */
         .busy_o()
-        /* verilator lint_on PINCONNECTEMPTY */
     );
 
 endmodule

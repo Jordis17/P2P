@@ -11,10 +11,6 @@
 // Se instancian dos copias: una con un valor pequeno, para comprobar el
 // comportamiento en pocos ciclos, y otra con el valor real de operacion.
 // Poder hacer esto es la razon de que TICK_CYCLES sea un parametro.
-//
-// Ejecutar:
-//   iverilog -g2012 -o tb tb_clk_tick_gen.sv ../DESIGN/clk_tick_gen.sv
-//   ./tb
 // =====================================================================
 `timescale 1ns/1ps
 

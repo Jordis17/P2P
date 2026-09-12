@@ -16,10 +16,6 @@
 // su propia tabla, escrita de forma independiente. Si ambas coinciden,
 // el decodificador es correcto; si se comparara contra la misma tabla, la
 // prueba seria una tautologia.
-//
-// Ejecutar:
-//   iverilog -g2012 -o tb tb_display_controller.sv ../DESIGN/display_controller.sv
-//   ./tb
 // =====================================================================
 `timescale 1ns/1ps
 

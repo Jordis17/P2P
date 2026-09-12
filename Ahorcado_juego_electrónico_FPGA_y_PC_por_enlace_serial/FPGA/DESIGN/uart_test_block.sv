@@ -36,9 +36,7 @@ module uart_test_block #(
     output logic [31:0] wdata_o,
     // De rdata_i solo se usan los bits bajos: el byte recibido y los dos
     // bits de control. El resto son reservados de la interfaz de 32 bits.
-    /* verilator lint_off UNUSEDSIGNAL */
     input  logic [31:0] rdata_i,
-    /* verilator lint_on UNUSEDSIGNAL */
 
     // evidencia local
     output logic [7:0]  ultimo_rx_o

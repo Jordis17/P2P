@@ -47,9 +47,7 @@ module lcd_screen_ctrl #(
     output logic        write_enable_o,
     output logic [1:0]  addr_o,
     output logic [31:0] wdata_o,
-    /* verilator lint_off UNUSEDSIGNAL */
     input  logic [31:0] rdata_i       // solo se miran los bits de busy y done
-    /* verilator lint_on UNUSEDSIGNAL */
 );
 
     import lcd_screen_pkg::A_CTRL, lcd_screen_pkg::A_DATOS,

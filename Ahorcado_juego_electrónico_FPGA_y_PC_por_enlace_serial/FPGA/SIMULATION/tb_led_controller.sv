@@ -8,10 +8,6 @@
 //   4. led_o[15] sigue al modo
 //   5. los LEDs 3 a 14 estan siempre apagados
 //   6. con la polaridad invertida el comportamiento logico es el mismo
-//
-// Ejecutar:
-//   iverilog -g2012 -o tb tb_led_controller.sv ../DESIGN/led_controller.sv
-//   ./tb
 // =====================================================================
 `timescale 1ns/1ps
 

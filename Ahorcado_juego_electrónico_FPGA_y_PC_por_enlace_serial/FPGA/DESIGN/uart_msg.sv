@@ -110,9 +110,7 @@ module uart_msg #(
     output logic        write_enable_o,
     output logic [1:0]  addr_o,
     output logic [31:0] wdata_o,
-    /* verilator lint_off UNUSEDSIGNAL */
     input  logic [31:0] rdata_i       // solo se mira el bit de send
-    /* verilator lint_on UNUSEDSIGNAL */
 );
 
     // codigos de evento
@@ -312,9 +310,9 @@ module uart_msg #(
     assign pos_patt = idx_q[3:0] - 4'd5;
     assign pos_word = idx_q[3:0] - 4'd8;
 
-    // Los tres caracteres de cada campo fijo se separan aqui y no dentro
-    // del bloque combinacional: iverilog no admite selecciones constantes
-    // en procesos always y avisa de que incluira el vector entero.
+    // Los tres caracteres de cada campo fijo se sacan aqui y no dentro
+    // del bloque combinacional, para que ahi se trabaje con nombres en
+    // lugar de con trozos del vector.
     logic [7:0] res_c0, res_c1, res_c2, fin_c0, fin_c1, fin_c2;
     assign res_c0 = res3[23:16];
     assign res_c1 = res3[15:8];

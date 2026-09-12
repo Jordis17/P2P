@@ -48,9 +48,7 @@ module lcd_peripheral (
     // interfaz estandar de periferico
     input  logic        write_enable_i,
     input  logic [1:0]  addr_i,
-    /* verilator lint_off UNUSEDSIGNAL */
     input  logic [31:0] wdata_i,     // bits 31:10 reservados por la interfaz
-    /* verilator lint_on UNUSEDSIGNAL */
     output logic [31:0] rdata_o,
 
     // frontera con el controlador fisico

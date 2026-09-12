@@ -429,13 +429,6 @@ La interfaz externa no cambió: `top` instancia `lcd_screen_ctrl` con los mismos
 puertos que antes, y ni el periférico ni el `game_controller` notan la
 diferencia.
 
-**Una consecuencia práctica del paquete.** iverilog compila en el orden en que se
-le pasan los archivos y necesita el paquete antes que cualquier módulo que lo
-importe. Por orden alfabético `lcd_screen_ctrl.sv` cae antes de
-`lcd_screen_pkg.sv`, así que `run_tests.py` pone los paquetes al principio de la
-lista a propósito. Vivado resuelve esa dependencia por su cuenta, pero el
-paquete tiene que estar agregado al proyecto.
-
 ---
 
 ## 10. UART
@@ -515,14 +508,11 @@ cierra, la toma. El efecto secundario es que entre dos bytes seguidos la línea
 queda en reposo unos tres tiempos de bit en vez de uno, lo que es válido en
 cualquier receptor y lleva el mensaje más largo de 3.0 ms a unos 4.0 ms.
 
-**Simulación.** iverilog no compila VHDL, así que la regresión sigue corriendo
-contra el modelo de comportamiento, con `SIMULATION/uart_core_sim.sv`
-declarando el mismo módulo. El núcleo real se simula en Vivado, que sí entiende
-lenguaje mixto, con las mismas pruebas: ahí es donde se comprueba que la
-interfaz supuesta y la real coinciden.
-
-Los dos archivos declaran `uart_core` y nunca se compilan juntos.
-`SIMULATION/run_tests.py` arma la lista de fuentes excluyendo el que no toca.
+**Simulación.** El núcleo real se simula en Vivado, que entiende lenguaje
+mixto. Los testbenches que no necesitan el núcleo entero usan
+`SIMULATION/uart_core_model.sv`, un modelo de comportamiento que hace de
+extremo opuesto de la línea: emite y recibe tramas para comprobar el protocolo
+sin arrastrar el VHDL a pruebas que no van de eso.
 
 ### Bloque de pruebas
 
@@ -788,9 +778,7 @@ validación de una letra, y prueba física.
 
 ### Estado actual
 
-Hay dieciséis testbenches con resumen PASS/FAIL, y los dieciséis pasan. El RTL
-compila sin un solo aviso bajo `verilator --lint-only -Wall`, tanto módulo por
-módulo como el sistema completo.
+Hay dieciséis testbenches con resumen PASS/FAIL, y los dieciséis pasan.
 
 Conviene decir con precisión qué cubre cada cosa, porque hay más módulos que
 testbenches. Los tres módulos en que se partió la capa de presentación del LCD
@@ -830,9 +818,6 @@ baudios, las esperas del LCD y la duración del resultado— porque con los valo
 reales una sola pantalla son millones de ciclos. Los valores reales están
 comprobados en el testbench de cada módulo, y esos mismos parámetros son los que
 hacen viable la simulación post-implementación temporizada.
-
-La regresión se corre con `python run_tests.py` desde `FPGA/SIMULATION`, o con
-`--lint` para revisar además el RTL con verilator.
 
 Falta correr las mismas pruebas en Vivado contra el núcleo real en VHDL y
 comparar sus resultados con los del modelo. La integración con el núcleo real sí
@@ -940,8 +925,9 @@ cuenten siempre lo mismo.
 
 El sistema completo funciona sobre la tarjeta: se juega desde la terminal de
 Python y el LCD, los displays y los LEDs acompañan. Con eso queda comprobada en
-hardware la integración con el núcleo UART en VHDL, que es la parte que la
-regresión con iverilog no puede cubrir porque sustituye el núcleo por un modelo.
+hardware la integración con el núcleo UART en VHDL, que es la parte que los
+testbenches del protocolo no cubren, porque ahí el otro extremo de la línea es
+un modelo de comportamiento y no el núcleo real.
 
 Las fotografías de las tres pantallas, la captura de una partida en la terminal y
 la del montaje están en `DOCUMENTATION/FIGURAS`.

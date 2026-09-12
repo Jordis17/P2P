@@ -24,11 +24,6 @@
 //      peticion
 //  12. los bits de solicitud se leen siempre como cero
 //  13. las direcciones no usadas leen cero
-//
-// Ejecutar:
-//   iverilog -g2012 -o tb tb_lcd_peripheral.sv \
-//            ../DESIGN/lcd_peripheral.sv ../DESIGN/lcd_controller.sv
-//   ./tb
 // =====================================================================
 `timescale 1ns/1ps
 

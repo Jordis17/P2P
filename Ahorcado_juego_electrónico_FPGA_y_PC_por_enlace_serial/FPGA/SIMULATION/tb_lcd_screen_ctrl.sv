@@ -19,11 +19,6 @@
 //   9. los datos se copian al empezar: cambiarlos a mitad no altera la
 //      pantalla que se esta dibujando
 //  10. busy_o sube al aceptar la orden y baja al terminar
-//
-// Ejecutar:
-//   iverilog -g2012 -o tb tb_lcd_screen_ctrl.sv ../DESIGN/lcd_screen_ctrl.sv \
-//            ../DESIGN/lcd_peripheral.sv ../DESIGN/lcd_controller.sv
-//   ./tb
 // =====================================================================
 `timescale 1ns/1ps
 

@@ -14,10 +14,6 @@
 //
 // Se usa un segundo corto para el recorrido completo y el valor real de
 // 1000 ticks para comprobar que un segundo son mil milisegundos.
-//
-// Ejecutar:
-//   iverilog -g2012 -o tb tb_round_timer.sv ../DESIGN/round_timer.sv
-//   ./tb
 // =====================================================================
 `timescale 1ns/1ps
 
