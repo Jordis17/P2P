@@ -1,37 +1,29 @@
 // =====================================================================
 // top.sv - Integracion del sistema
 //
-// Un solo reloj de 100 MHz. Todo lo que necesita una base de tiempo mas
-// lenta sale del tick de 1 ms o de contadores propios: no hay relojes
-// derivados.
+// Aqui se instancian todos los modulos y se conectan entre si. Se
+// trabaja con un solo reloj de 100 MHz: lo que necesita ir mas lento
+// usa el tick de 1 ms o lleva su propio contador, de modo que no hay
+// relojes derivados en ninguna parte.
 //
-// Cadena de cada periferico
-// -------------------------
+// Cada periferico se maneja a traves de una cadena de tres niveles:
+//
 //   game_controller -> lcd_screen_ctrl -> lcd_peripheral -> lcd_controller
 //   game_controller -> uart_msg        -> uart_peripheral -> uart_core
 //
-// Cada periferico tiene un unico maestro, que es su capa de presentacion.
-// El control del juego no toca ningun bus: pide pantallas y eventos.
+// El control del juego nunca escribe directamente en un periferico, lo
+// hace siempre a traves de su capa de presentacion, y cada periferico
+// tiene una sola capa que lo maneje.
 //
-// Reset
-// -----
-// rst viene del boton central, sincronizado y filtrado por el mismo
-// bloque que los otros dos. Ese filtro no se reinicia con nada, porque
-// seria circular: sus registros arrancan con el valor que declara la
-// descripcion, que en Xilinx se carga desde el bitstream durante la
-// configuracion.
+// El reset viene del boton central y pasa por el mismo filtro que los
+// otros dos botones. Ese filtro no se reinicia con nada, porque seria
+// circular: sus registros arrancan con el valor que declara el codigo,
+// que en la FPGA se carga desde el bitstream. Por lo mismo el juego
+// funciona apenas se programa la tarjeta, sin pulsar nada.
 //
-// Por eso mismo el sistema funciona al programar la tarjeta sin que nadie
-// pulse nada: todos los registros tienen valor inicial y el controlador
-// del LCD lanza su secuencia de arranque por su cuenta.
-//
-// Bloque de pruebas del UART
-// --------------------------
-// Con MODO_PRUEBA_UART en uno, el periferico UART lo maneja el bloque de
-// pruebas en lugar de la capa de protocolo, y el resto del juego queda
-// desconectado de la PC. Es el modo que pide el enunciado para validar la
-// comunicacion antes de integrar. La seleccion es por parametro y se
-// resuelve en sintesis: no queda un multiplexor en el camino.
+// Con MODO_PRUEBA_UART en 1 el periferico UART lo maneja el bloque de
+// pruebas en lugar de la capa de protocolo. Se decide por parametro, o
+// sea en sintesis, y no queda ningun multiplexor en el camino.
 // =====================================================================
 
 module top #(
@@ -89,15 +81,16 @@ module top #(
         .clk_i(clk_i), .rst_i(1'b0), .tick_o(tick)
     );
 
-    // Cada boton produce las dos formas, nivel y pulso, pero cada uno
-    // usa solo la que le corresponde: el reinicio es un nivel y los otros
-    // dos son eventos. Dejar la otra sin conectar es la decision.
+    // Cada boton entrega las dos formas, el nivel y el pulso, pero cada
+    // uno usa solo la que le sirve. El reinicio se toma como nivel y los
+    // otros dos como eventos, asi que la otra salida se deja sin conectar.
     /* verilator lint_off UNUSEDSIGNAL */
     logic rst, rst_pulso;
     logic btn_sel, btn_ok, nivel_sel, nivel_ok;
     /* verilator lint_on UNUSEDSIGNAL */
 
-    // El filtro del boton de reinicio no puede depender del reinicio.
+    // El filtro del boton de reinicio no puede depender del reinicio, por
+    // eso este es el unico que recibe un cero fijo.
     button_input #(.DEBOUNCE_MS(DEBOUNCE_MS), .BTN_ACTIVE_LEVEL(BTN_ACTIVE_LEVEL))
     filtro_rst (
         .clk_i(clk_i), .rst_i(1'b0), .tick_i(tick), .btn_i(btn_rst_i),
@@ -216,8 +209,8 @@ module top #(
     );
 
     // ---------------- cadena del UART ----------------
-    // El periferico tiene un solo maestro. Cual de los dos es se decide
-    // por parametro, asi que en sintesis solo queda uno.
+    // El periferico tiene un solo maestro. Cual de los dos sea se decide
+    // por parametro, asi que despues de sintetizar solo queda uno.
     logic        msg_we, test_we, uart_we;
     logic [1:0]  msg_addr, test_addr, uart_addr;
     logic [31:0] msg_wdata, test_wdata, uart_wdata, uart_rdata;
@@ -271,8 +264,8 @@ module top #(
         .seg_o(seg_o), .an_o(an_o)
     );
 
-    // En modo de prueba los LEDs muestran el ultimo byte recibido, que es
-    // la evidencia local que pide el enunciado para validar el UART.
+    // En modo de prueba los LEDs muestran el ultimo byte que llego por el
+    // serial, para poder comprobar la comunicacion viendo la tarjeta.
     logic [15:0] led_juego;
     led_controller #(.LED_ACTIVE_LEVEL(LED_ACTIVE_LEVEL)) leds (
         .state_i(estado), .mode_i(modo), .led_o(led_juego)
