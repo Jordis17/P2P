@@ -5,40 +5,22 @@
 // aplicacion de PC y las entrega byte a byte al periferico UART, y en el
 // sentido contrario recoge la letra que el jugador escribe.
 //
-// Mensajes
-// --------
-//   evento        lineas que emite
-//   inicio        START:<M>:<LL>   PATT:<p>   ERR:<n>
-//   letra         LET:<X>:<R>      PATT:<p>   ERR:<n>
-//   repetida      LET:<X>:RPT
-//   fin           END:<E>:<W>
+// El trabajo esta repartido en tres piezas:
 //
-//   <M>  F o D            <LL> longitud con dos digitos
-//   <p>  patron, con guion bajo en lo oculto, tantos caracteres como
-//        letras tenga la palabra
-//   <X>  la letra         <R>  OK, NO o RPT, siempre tres caracteres
-//   <n>  intentos que quedan
-//   <E>  WIN, LER o LTO   <W>  la palabra completa
+//   uart_msg_snapshot   congela los datos de la jugada al aceptar la orden
+//   uart_msg_char_gen   dice que caracter va en cada posicion del mensaje
+//   uart_msg            (este) recorre las posiciones y habla con el bus
 //
-// Todas terminan en salto de linea. Los campos son de ancho fijo para
-// que el analizador de Python trocee por posicion, sin expresiones
-// regulares, y para que aqui solo el patron y la palabra tengan longitud
-// variable.
+// Aqui queda solo el recorrido y el dialogo con el periferico. El formato
+// de los mensajes esta entero en el generador de caracteres, de modo que
+// cambiar una linea del protocolo no obliga a mirar la maquina de estados.
 //
-// Por que existe este modulo
-// --------------------------
+// Por que existe esta capa
+// ------------------------
 // La secuencia mas larga son unos 35 bytes, cada uno con su escritura de
 // registro y su espera. Metida en el control del juego, esa cuenta
 // convertiria una maquina de siete estados en uno de esos bloques que
 // nadie quiere leer ni defender.
-//
-// Los datos se copian al empezar
-// ------------------------------
-// Al aceptar el evento se guarda copia de la palabra, el patron, los
-// errores, el modo, la letra y el resultado. Emitir la secuencia larga
-// tarda unos 3 ms a 115200 baudios; leer las entradas byte a byte
-// dejaria una trama con la letra de una jugada y el patron de la
-// siguiente.
 //
 // Un evento que llega con busy_o en alto se ignora, igual que en las
 // demas capas: esperar es tarea de quien pide.
@@ -88,7 +70,7 @@ module uart_msg #(
     input  logic        rst_i,
 
     // orden de envio
-    input  logic [1:0]  event_i,      // ver codigos mas abajo
+    input  logic [1:0]  event_i,      // 0 inicio, 1 letra, 2 repetida, 3 fin
     input  logic        send_i,       // pulso
     output logic        busy_o,
 
@@ -110,14 +92,8 @@ module uart_msg #(
     output logic        write_enable_o,
     output logic [1:0]  addr_o,
     output logic [31:0] wdata_o,
-    input  logic [31:0] rdata_i       // solo se mira el bit de send
+    input  logic [31:0] rdata_i       // solo se miran los bits de send y new_rx
 );
-
-    // codigos de evento
-    localparam logic [1:0] EV_INICIO   = 2'd0;
-    localparam logic [1:0] EV_LETRA    = 2'd1;
-    localparam logic [1:0] EV_REPETIDA = 2'd2;
-    localparam logic [1:0] EV_FIN      = 2'd3;
 
     // mapa de registros del periferico
     localparam logic [1:0] A_TX     = 2'b00;
@@ -128,40 +104,6 @@ module uart_msg #(
 
     localparam logic [7:0] CAR_A = 8'h41;
     localparam logic [7:0] CAR_Z = 8'h5A;
-
-    localparam logic [7:0] CAR_LF      = 8'h0A;
-    localparam logic [7:0] CAR_DOSP    = 8'h3A;   // ':'
-    localparam logic [7:0] CAR_ESPACIO = 8'h20;
-    localparam logic [7:0] CAR_GUION   = 8'h5F;   // '_'
-    localparam logic [7:0] CAR_CERO    = 8'h30;
-    localparam logic [7:0] CAR_UNO     = 8'h31;
-    localparam logic [7:0] CAR_D       = 8'h44;
-    localparam logic [7:0] CAR_F       = 8'h46;
-
-    localparam int         N_POS   = 16;   // holgura sobre MAX_LEN para el indice
-    localparam logic [2:0] MAX_ERR = 3'd6;
-
-    // Prefijos rellenados a ocho caracteres para poder indexarlos todos
-    // con el mismo calculo. Nunca se lee mas alla de los dos puntos.
-    localparam logic [63:0] PRE_START = "START:  ";
-    localparam logic [63:0] PRE_LET   = "LET:    ";
-    localparam logic [63:0] PRE_PATT  = "PATT:   ";
-    localparam logic [63:0] PRE_ERR   = "ERR:    ";
-    localparam logic [63:0] PRE_END   = "END:    ";
-
-    localparam logic [23:0] RES_OK  = "OK ";
-    localparam logic [23:0] RES_NO  = "NO ";
-    localparam logic [23:0] RES_RPT = "RPT";
-    localparam logic [23:0] FIN_WIN = "WIN";
-    localparam logic [23:0] FIN_LER = "LER";
-    localparam logic [23:0] FIN_LTO = "LTO";
-
-    // identificador de linea
-    localparam logic [2:0] L_START = 3'd0;
-    localparam logic [2:0] L_LET   = 3'd1;
-    localparam logic [2:0] L_PATT  = 3'd2;
-    localparam logic [2:0] L_ERR   = 3'd3;
-    localparam logic [2:0] L_END   = 3'd4;
 
     typedef enum logic [2:0] {
         S_IDLE,
@@ -176,17 +118,6 @@ module uart_msg #(
     estado_t    st_q    = S_IDLE;
     logic [1:0] linea_q = 2'd0;    // linea dentro de la secuencia
     logic [4:0] idx_q   = 5'd0;    // byte dentro de la linea
-
-    // copia de los datos al aceptar el evento
-    logic [1:0]           ev_q   = EV_INICIO;
-    logic [7:0]           let_q  = CAR_ESPACIO;
-    logic                 hit_q  = 1'b0;
-    logic [1:0]           fin_q  = 2'd0;
-    logic [8*MAX_LEN-1:0] wd_q   = '0;
-    logic [3:0]           wl_q   = 4'd0;
-    logic [MAX_LEN-1:0]   rev_q  = '0;
-    logic [2:0]           err_q  = 3'd0;
-    logic                 mode_q = 1'b0;
 
     logic pend_q = 1'b0;    // envio anotado y todavia no empezado
     logic rx_val_q = 1'b0;
@@ -204,175 +135,54 @@ module uart_msg #(
     assign busy_o      = tx_en_curso || pend_q;
 
     // ---------------------------------------------------------------
-    // Que linea toca
+    // Copia estable de los datos de la jugada
     // ---------------------------------------------------------------
-    logic [2:0] linea_id;
+    // La orden se acepta y los datos se copian en el mismo ciclo en que
+    // llega, aunque el sondeo de recepcion este a mitad. Solo se descarta
+    // si ya hay una transmision en curso.
+    logic capturar;
+    assign capturar = !rst_i && send_i && !tx_en_curso && !pend_q;
+
+    logic [1:0]           ev_cong;
+    logic [7:0]           let_cong;
+    logic                 hit_cong;
+    logic [1:0]           fin_cong;
+    logic [8*MAX_LEN-1:0] wd_cong;
+    logic [3:0]           wl_cong;
+    logic [MAX_LEN-1:0]   rev_cong;
+    logic [2:0]           err_cong;
+    logic                 mode_cong;
+
+    uart_msg_snapshot #(.MAX_LEN(MAX_LEN)) datos_congelados (
+        .clk_i(clk_i), .capture_i(capturar),
+        .event_i(event_i), .letter_i(letter_i), .hit_i(hit_i),
+        .end_code_i(end_code_i), .word_data_i(word_data_i),
+        .word_len_i(word_len_i), .revealed_i(revealed_i),
+        .errors_i(errors_i), .mode_i(mode_i),
+        .event_o(ev_cong), .letter_o(let_cong), .hit_o(hit_cong),
+        .end_code_o(fin_cong), .word_data_o(wd_cong),
+        .word_len_o(wl_cong), .revealed_o(rev_cong),
+        .errors_o(err_cong), .mode_o(mode_cong)
+    );
+
+    // ---------------------------------------------------------------
+    // Caracter que toca emitir
+    // ---------------------------------------------------------------
+    // El generador tambien devuelve cuantas lineas tiene el evento y cual
+    // es el ultimo indice de la linea actual, que es lo que la maquina de
+    // estados necesita para saber cuando avanzar.
+    logic [7:0] car;
+    logic [4:0] ult_idx;
     logic [1:0] n_lineas;
 
-    assign n_lineas = ((ev_q == EV_INICIO) || (ev_q == EV_LETRA)) ? 2'd3 : 2'd1;
-
-    always_comb begin
-        unique case (ev_q)
-            EV_INICIO: begin
-                if      (linea_q == 2'd0) linea_id = L_START;
-                else if (linea_q == 2'd1) linea_id = L_PATT;
-                else                      linea_id = L_ERR;
-            end
-            EV_LETRA: begin
-                if      (linea_q == 2'd0) linea_id = L_LET;
-                else if (linea_q == 2'd1) linea_id = L_PATT;
-                else                      linea_id = L_ERR;
-            end
-            EV_REPETIDA: linea_id = L_LET;
-            EV_FIN:      linea_id = L_END;
-            default:     linea_id = L_END;
-        endcase
-    end
-
-    // longitud de la linea actual
-    logic [4:0] len_linea, ult_idx;
-    always_comb begin
-        unique case (linea_id)
-            L_START: len_linea = 5'd11;                  // START:M:LL y salto
-            L_LET:   len_linea = 5'd10;                  // LET:X:RRR y salto
-            L_PATT:  len_linea = 5'd6 + {1'b0, wl_q};    // PATT: patron y salto
-            L_ERR:   len_linea = 5'd6;                   // ERR:n y salto
-            default: len_linea = 5'd9 + {1'b0, wl_q};    // END:EEE:palabra y salto
-        endcase
-    end
-    assign ult_idx = len_linea - 5'd1;
-
-    // ---------------------------------------------------------------
-    // Campos variables
-    // ---------------------------------------------------------------
-    logic [7:0] len_dec, len_uni, dig_intentos;
-    logic [2:0] intentos;
-
-    // La longitud nunca pasa de doce, asi que el digito de las decenas
-    // sale de una comparacion y no de una division.
-    assign len_dec      = (wl_q >= 4'd10) ? CAR_UNO : CAR_CERO;
-    assign len_uni      = CAR_CERO + ((wl_q >= 4'd10) ? {4'd0, wl_q - 4'd10}
-                                                      : {4'd0, wl_q});
-    assign intentos     = MAX_ERR - err_q;
-    assign dig_intentos = CAR_CERO + {5'b00000, intentos};
-
-    logic [23:0] res3, fin3;
-    assign res3 = (ev_q == EV_REPETIDA) ? RES_RPT : (hit_q ? RES_OK : RES_NO);
-
-    always_comb begin
-        unique case (fin_q)
-            2'd0:    fin3 = FIN_WIN;
-            2'd1:    fin3 = FIN_LER;
-            2'd2:    fin3 = FIN_LTO;
-            default: fin3 = FIN_LTO;
-        endcase
-    end
-
-    // patron y palabra, un caracter por posicion
-    logic [7:0] patron  [0:N_POS-1];
-    logic [7:0] palabra [0:N_POS-1];
-
-    always_comb begin
-        for (int c = 0; c < N_POS; c++) begin
-            patron[c]  = CAR_ESPACIO;
-            palabra[c] = CAR_ESPACIO;
-        end
-        for (int c = 0; c < MAX_LEN; c++) begin
-            palabra[c] = wd_q[8*(MAX_LEN-1-c) +: 8];
-            patron[c]  = rev_q[c] ? wd_q[8*(MAX_LEN-1-c) +: 8] : CAR_GUION;
-        end
-    end
-
-    // ---------------------------------------------------------------
-    // Byte que toca emitir
-    // ---------------------------------------------------------------
-    logic [63:0] pre;
-    always_comb begin
-        unique case (linea_id)
-            L_START: pre = PRE_START;
-            L_LET:   pre = PRE_LET;
-            L_PATT:  pre = PRE_PATT;
-            L_ERR:   pre = PRE_ERR;
-            default: pre = PRE_END;
-        endcase
-    end
-
-    logic [5:0] base_pre;
-    logic [7:0] car_pre;
-    assign base_pre = 6'd56 - {idx_q[2:0], 3'b000};   // 8*(7 - idx)
-    assign car_pre  = pre[base_pre +: 8];
-
-    // Las posiciones dentro del patron y de la palabra se cuentan desde
-    // donde empieza cada campo. La resta va en cuatro bits porque el
-    // resultado siempre cae por debajo de la longitud maxima.
-    logic [3:0] pos_patt, pos_word;
-
-    assign pos_patt = idx_q[3:0] - 4'd5;
-    assign pos_word = idx_q[3:0] - 4'd8;
-
-    // Los tres caracteres de cada campo fijo se sacan aqui y no dentro
-    // del bloque combinacional, para que ahi se trabaje con nombres en
-    // lugar de con trozos del vector.
-    logic [7:0] res_c0, res_c1, res_c2, fin_c0, fin_c1, fin_c2;
-    assign res_c0 = res3[23:16];
-    assign res_c1 = res3[15:8];
-    assign res_c2 = res3[7:0];
-    assign fin_c0 = fin3[23:16];
-    assign fin_c1 = fin3[15:8];
-    assign fin_c2 = fin3[7:0];
-
-    logic [7:0] car;
-    always_comb begin
-        car = CAR_LF;
-        unique case (linea_id)
-
-            // START:<M>:<LL>
-            L_START: begin
-                if      (idx_q <  5'd6) car = car_pre;
-                else if (idx_q == 5'd6) car = mode_q ? CAR_D : CAR_F;
-                else if (idx_q == 5'd7) car = CAR_DOSP;
-                else if (idx_q == 5'd8) car = len_dec;
-                else if (idx_q == 5'd9) car = len_uni;
-                else                    car = CAR_LF;
-            end
-
-            // LET:<X>:<R>
-            L_LET: begin
-                if      (idx_q <  5'd4) car = car_pre;
-                else if (idx_q == 5'd4) car = let_q;
-                else if (idx_q == 5'd5) car = CAR_DOSP;
-                else if (idx_q == 5'd6) car = res_c0;
-                else if (idx_q == 5'd7) car = res_c1;
-                else if (idx_q == 5'd8) car = res_c2;
-                else                    car = CAR_LF;
-            end
-
-            // PATT:<p>
-            L_PATT: begin
-                if      (idx_q < 5'd5)  car = car_pre;
-                else if (idx_q < len_linea - 5'd1) car = patron[pos_patt];
-                else                    car = CAR_LF;
-            end
-
-            // ERR:<n>
-            L_ERR: begin
-                if      (idx_q <  5'd4) car = car_pre;
-                else if (idx_q == 5'd4) car = dig_intentos;
-                else                    car = CAR_LF;
-            end
-
-            // END:<E>:<W>
-            default: begin
-                if      (idx_q <  5'd4) car = car_pre;
-                else if (idx_q == 5'd4) car = fin_c0;
-                else if (idx_q == 5'd5) car = fin_c1;
-                else if (idx_q == 5'd6) car = fin_c2;
-                else if (idx_q == 5'd7) car = CAR_DOSP;
-                else if (idx_q < len_linea - 5'd1) car = palabra[pos_word];
-                else                    car = CAR_LF;
-            end
-        endcase
-    end
+    uart_msg_char_gen #(.MAX_LEN(MAX_LEN)) generador (
+        .event_i(ev_cong), .letter_i(let_cong), .hit_i(hit_cong),
+        .end_code_i(fin_cong), .word_data_i(wd_cong),
+        .word_len_i(wl_cong), .revealed_i(rev_cong),
+        .errors_i(err_cong), .mode_i(mode_cong),
+        .line_i(linea_q), .idx_i(idx_q),
+        .char_o(car), .last_idx_o(ult_idx), .n_lines_o(n_lineas)
+    );
 
     // ---------------------------------------------------------------
     // Bus hacia el periferico
@@ -403,31 +213,20 @@ module uart_msg #(
         endcase
     end
 
+    // ---------------------------------------------------------------
+    // Recorrido de la secuencia
+    // ---------------------------------------------------------------
     always_ff @(posedge clk_i) begin
         rx_val_q <= 1'b0;
 
         if (rst_i) begin
-            st_q     <= S_IDLE;
-            linea_q  <= 2'd0;
-            idx_q    <= 5'd0;
-            pend_q   <= 1'b0;
+            st_q      <= S_IDLE;
+            linea_q   <= 2'd0;
+            idx_q     <= 5'd0;
+            pend_q    <= 1'b0;
             rx_byte_q <= 8'h00;
         end else begin
-            // La orden se anota y los datos se copian en el mismo ciclo en
-            // que llega, aunque el sondeo de recepcion este a mitad. Solo
-            // se descarta si ya hay una transmision en curso.
-            if (send_i && !tx_en_curso && !pend_q) begin
-                pend_q <= 1'b1;
-                ev_q   <= event_i;
-                let_q  <= letter_i;
-                hit_q  <= hit_i;
-                fin_q  <= end_code_i;
-                wd_q   <= word_data_i;
-                wl_q   <= word_len_i;
-                rev_q  <= revealed_i;
-                err_q  <= errors_i;
-                mode_q <= mode_i;
-            end
+            if (capturar) pend_q <= 1'b1;
 
             unique case (st_q)
 
