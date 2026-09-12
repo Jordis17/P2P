@@ -595,14 +595,19 @@ limitación conocida.
 Cuatro de los ocho dígitos, con la misma distribución siempre:
 
 ```
-AN3–AN2  →  segundos que quedan
+AN5–AN4  →  segundos que quedan
 AN1–AN0  →  victorias
 ```
 
-`AN7–AN4` se mantienen apagados explícitamente.
+Los ocho dígitos de la tarjeta están en dos bloques de cuatro, separados por un
+hueco. Las dos cantidades se reparten una a cada bloque, pegadas a ese hueco, en
+vez de ir juntas: con los cuatro dígitos seguidos se leían como un único número
+de cuatro cifras. `AN3`, `AN2`, `AN7` y `AN6` se mantienen apagados
+explícitamente.
 
 Multiplexado a un dígito por tick de 1 ms: refresco completo cada 4 ms, 250 Hz,
-muy por encima del umbral de parpadeo y sin contadores nuevos.
+muy por encima del umbral de parpadeo y sin contadores nuevos. El reparto entre
+bloques no cambia esa cuenta, porque siguen siendo cuatro dígitos por vuelta.
 
 **LEDs:** LED0 en selección, LED1 en partida, LED2 en resultado, LED15 encendido
 si el modo es difícil. Los tres primeros son excluyentes y lo comprobamos con una
