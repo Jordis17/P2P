@@ -31,11 +31,6 @@
 //  15. el resultado se muestra y vuelve solo a la seleccion
 //  16. el contador de victorias arrastra bien y satura en 99
 //  17. nunca se da una orden a una capa que esta ocupada
-//
-// Ejecutar:
-//   iverilog -g2012 -o tb tb_game_controller.sv ../DESIGN/game_controller.sv \
-//            ../DESIGN/word_rom.sv ../DESIGN/lfsr.sv ../DESIGN/round_timer.sv
-//   ./tb
 // =====================================================================
 `timescale 1ns/1ps
 

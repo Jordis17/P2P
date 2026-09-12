@@ -20,10 +20,6 @@
 //   9. un comando de limpieza usa la espera larga y una escritura la corta
 //  10. una peticion recibida con el controlador ocupado se descarta
 //  11. un reinicio no repite la secuencia de arranque
-//
-// Ejecutar:
-//   iverilog -g2012 -o tb tb_lcd_controller.sv ../DESIGN/lcd_controller.sv
-//   ./tb
 // =====================================================================
 `timescale 1ns/1ps
 

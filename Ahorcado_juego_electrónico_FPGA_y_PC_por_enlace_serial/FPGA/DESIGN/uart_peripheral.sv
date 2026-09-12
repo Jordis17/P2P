@@ -58,9 +58,7 @@ module uart_peripheral (
     // Los bits 31:8 estan reservados por la interfaz estandar de 32 bits:
     // la carga util de este periferico es de un byte. Que no se usen es
     // deliberado, no un olvido.
-    /* verilator lint_off UNUSEDSIGNAL */
     input  logic [31:0] wdata_i,
-    /* verilator lint_on UNUSEDSIGNAL */
     output logic [31:0] rdata_o,
 
     // frontera con el nucleo UART

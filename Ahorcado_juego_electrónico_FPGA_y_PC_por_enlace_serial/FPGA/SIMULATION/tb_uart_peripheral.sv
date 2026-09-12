@@ -24,11 +24,6 @@
 //
 // Las dos ultimas son la razon de ser de la semantica por bit. Con un
 // registro plano, cualquiera de las dos fallaria.
-//
-// Ejecutar:
-//   iverilog -g2012 -o tb tb_uart_peripheral.sv uart_core_model.sv \
-//            ../DESIGN/uart_peripheral.sv
-//   ./tb
 // =====================================================================
 `timescale 1ns/1ps
 

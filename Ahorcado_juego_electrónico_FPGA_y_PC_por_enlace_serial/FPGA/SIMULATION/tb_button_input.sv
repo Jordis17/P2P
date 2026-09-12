@@ -14,10 +14,6 @@
 //
 // Se usa un debounce corto y un tick rapido para que la simulacion dure
 // poco; el comportamiento no depende de los valores absolutos.
-//
-// Ejecutar:
-//   iverilog -g2012 -o tb tb_button_input.sv ../DESIGN/button_input.sv
-//   ./tb
 // =====================================================================
 `timescale 1ns/1ps
 

@@ -20,10 +20,6 @@
 //
 // El muestreo se hace en flanco de bajada para leer el estado ya
 // establecido y no el previo al flanco de subida.
-//
-// Ejecutar:
-//   iverilog -g2012 -o tb tb_lfsr.sv ../DESIGN/lfsr.sv
-//   ./tb
 // =====================================================================
 `timescale 1ns/1ps
 

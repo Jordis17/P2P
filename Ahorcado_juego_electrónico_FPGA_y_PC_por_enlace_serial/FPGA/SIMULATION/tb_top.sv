@@ -32,11 +32,6 @@
 //   6. el sexto fallo termina la partida con END:LER y PERDISTE: FALLOS
 //   7. el sistema vuelve solo a la pantalla de seleccion
 //   8. los LEDs de estado acompanan cada etapa
-//
-// Ejecutar:
-//   iverilog -g2012 -o tb tb_top.sv ../DESIGN/*.sv uart_core.sv \
-//            uart_core_model.sv
-//   ./tb
 // =====================================================================
 `timescale 1ns/1ps
 

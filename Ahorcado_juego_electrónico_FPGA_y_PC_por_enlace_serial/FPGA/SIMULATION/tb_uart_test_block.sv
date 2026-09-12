@@ -19,11 +19,6 @@
 //   3. ese byte se retransmite
 //   4. el eco no descoloca la secuencia: al reanudarse continua en el
 //      caracter que tocaba
-//
-// Ejecutar:
-//   iverilog -g2012 -o tb tb_uart_test_block.sv uart_core_model.sv \
-//            ../DESIGN/uart_peripheral.sv ../DESIGN/uart_test_block.sv
-//   ./tb
 // =====================================================================
 `timescale 1ns/1ps
 

@@ -17,10 +17,6 @@
 // 100 kHz, de modo que los semiperiodos son de decenas de ciclos en vez
 // de decenas de miles. La comprobacion 10 verifica aparte que la misma
 // formula, evaluada a 100 MHz, produce los numeros de la documentacion.
-//
-// Ejecutar:
-//   iverilog -g2012 -o tb tb_buzzer_controller.sv ../DESIGN/buzzer_controller.sv
-//   ./tb
 // =====================================================================
 `timescale 1ns/1ps
 

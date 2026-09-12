@@ -28,11 +28,6 @@
 //  12. un byte que no es una letra se descarta y deja el aviso limpio,
 //      de modo que la letra siguiente si llega
 //  13. un byte recibido durante una transmision se atiende al terminar
-//
-// Ejecutar:
-//   iverilog -g2012 -o tb tb_uart_msg.sv ../DESIGN/uart_msg.sv \
-//            ../DESIGN/uart_peripheral.sv uart_core_model.sv
-//   ./tb
 // =====================================================================
 `timescale 1ns/1ps
 

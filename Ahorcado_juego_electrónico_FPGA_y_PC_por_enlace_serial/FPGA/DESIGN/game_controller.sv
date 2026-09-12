@@ -87,9 +87,7 @@ module game_controller #(
     // Generador pseudoaleatorio, corriendo libre. Se conecta entero
     // aunque solo se usen los seis bits bajos: la seleccion es por
     // truncamiento y descartar los dos altos es la decision, no un olvido.
-    /* verilator lint_off UNUSEDSIGNAL */
     input  logic [7:0] lfsr_i,
-    /* verilator lint_on UNUSEDSIGNAL */
 
     // banco de palabras
     output logic [$clog2(N_WORDS)-1:0] rom_index_o,
@@ -241,8 +239,8 @@ module game_controller #(
     // ---------------------------------------------------------------
     // Contador de victorias en BCD, con saturacion en 99
     // ---------------------------------------------------------------
-    // Los dos digitos se separan con asignaciones continuas: iverilog no
-    // admite selecciones constantes dentro de un proceso always.
+    // Los dos digitos se sacan aqui con asignaciones continuas para que
+    // el proceso de abajo trabaje con nombres y no con trozos del vector.
     logic [3:0] win_dec, win_uni;
     logic [7:0] wins_next;
     assign win_dec   = wins_q[7:4];

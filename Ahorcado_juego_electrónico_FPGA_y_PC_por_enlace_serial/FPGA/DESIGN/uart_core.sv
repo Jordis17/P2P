@@ -7,10 +7,8 @@
 // todo lo que dependia del nucleo real queda aqui, y ni los registros ni
 // nada por encima cambian.
 //
-// Este archivo NO se puede compilar con iverilog ni revisar con
-// verilator: instancia entidades VHDL. La simulacion mixta se hace en
-// Vivado. Para la regresion con iverilog esta uart_core_sim.sv, que
-// declara el mismo modulo sobre el modelo de comportamiento.
+// Este modulo instancia entidades VHDL, asi que la simulacion es de
+// lenguaje mixto y se hace en Vivado.
 //
 // No se usa UART.vhd
 // ------------------

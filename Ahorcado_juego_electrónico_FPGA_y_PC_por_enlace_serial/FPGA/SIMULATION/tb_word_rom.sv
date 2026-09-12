@@ -11,9 +11,6 @@
 // La propiedad 2 es la que hace innecesario comprobar la longitud en
 // tiempo de ejecucion: si se cumple aqui, el truncamiento del LFSR a
 // cinco bits no puede producir una palabra corta.
-//
-// Ejecutar:  iverilog -g2012 -o tb tb_word_rom.sv ../DESIGN/word_rom.sv
-//            ./tb
 // =====================================================================
 `timescale 1ns/1ps
 
