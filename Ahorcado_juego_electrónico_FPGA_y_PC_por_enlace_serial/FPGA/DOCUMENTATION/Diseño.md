@@ -36,6 +36,8 @@ top
 │    ├── lcd_step_decoder     del número de paso a comando, fila y columna
 │    └── lcd_text_gen         el byte que va en cada posición
 ├── uart_msg         →  uart_peripheral →  uart_core       →  PC
+│    ├── uart_msg_snapshot   copia estable de los datos de la jugada
+│    └── uart_msg_char_gen   el carácter que va en cada posición
 ├── uart_test_block       pruebas del UART, se activa por parámetro
 ├── display_controller
 ├── buzzer_controller
@@ -514,6 +516,42 @@ mixto. Los testbenches que no necesitan el núcleo entero usan
 extremo opuesto de la línea: emite y recibe tramas para comprobar el protocolo
 sin arrastrar el VHDL a pruebas que no van de eso.
 
+### Cómo está partida la capa de protocolo
+
+`uart_msg` tenía el mismo problema que `lcd_screen_ctrl`: hacía tres cosas a la
+vez. Congelaba los datos de la jugada, decidía qué carácter va en cada posición de
+cada línea del protocolo, y recorría esas posiciones hablando con el periférico.
+Eran algo más de trescientas líneas de código con el formato de los mensajes y la
+máquina de estados mezclados.
+
+Se partió con el mismo criterio:
+
+| Módulo | De qué se encarga | Tipo |
+|---|---|---|
+| `uart_msg` | la máquina de estados que habla con el periférico, el recorrido de líneas y posiciones, y la recepción | secuencial |
+| `uart_msg_snapshot` | registra los datos de la jugada al aceptar la orden | secuencial |
+| `uart_msg_char_gen` | dice qué carácter va en esa línea y posición, y cuántas líneas tiene el evento | combinacional |
+
+Acá no hizo falta un paquete de constantes: los códigos ASCII, los prefijos y los
+identificadores de línea los usa solo el generador, y el mapa de registros del
+periférico solo la máquina de estados.
+
+El generador devuelve también cuántas líneas tiene el evento y cuál es el último
+índice de la línea actual. Esas dos señales son lo único que la máquina de estados
+necesita saber del formato, así que cambiar una línea del protocolo no obliga a
+abrirla.
+
+La interfaz externa no cambió: `top` instancia `uart_msg` con los mismos puertos
+que antes, con los mismos anchos y direcciones, y `tb_uart_msg` corre sin
+modificarlo.
+
+Se comprobó que el comportamiento es idéntico poniendo las dos versiones en
+paralelo, cada una con su periférico y su modelo de núcleo, y comparando siete
+señales en cada flanco de reloj durante 525 385 ciclos: `write_enable`, `addr`,
+`wdata`, `busy`, `rx_valid`, `rx_letter` y la línea serie. Cero diferencias. El
+hardware también es el mismo, 149 flip-flops antes y después, porque las
+jerarquías de módulo se aplanan en síntesis.
+
 ### Bloque de pruebas
 
 `uart_test_block` es un módulo aparte, sintetizable, que se activa por parámetro
@@ -532,10 +570,10 @@ descarta. Python valida antes de mandar, y la FPGA valida igual.
 
 Ese filtro vive en `uart_msg`, no en el `game_controller`: descartar un byte que
 no es una letra es cuestión de protocolo, no una regla del juego. El aviso de
-byte recibido se limpia siempre, sea la letra válida o no. Eso resuelve además lo
-que pide el enunciado sobre las letras que llegan en la pantalla de selección o
-mostrando el resultado: se ignoran, pero el aviso queda limpio y no se cuela como
-primera letra de la partida siguiente.
+byte recibido se limpia siempre, sea la letra válida o no. Eso resuelve además el
+caso de las letras que llegan cuando no hay partida en curso, en la pantalla de
+selección o mostrando el resultado: se ignoran, pero el aviso queda limpio y no se
+cuela como primera letra de la partida siguiente.
 
 **De la FPGA a la PC:**
 
@@ -666,7 +704,7 @@ que la FPGA anuncie el inicio.
 | LCD `R/W` | `lcd_rw_o` | JB8 | R16 |
 | LCD `E` | `lcd_e_o` | JB9 | T9 |
 | Audio | `aud_pwm_o` | AUD_PWM | A11 |
-| Habilitación de audio | `aud_sd_o` | AUD_SD | D12 · *sin confirmar, ver sección 15* |
+| Habilitación de audio | `aud_sd_o` | AUD_SD | D12 |
 | `BTN_RST` | `btn_rst_i` | btnC | E16 |
 | `BTN_SEL` | `btn_sel_i` | btnL | T16 |
 | `BTN_OK` | `btn_ok_i` | btnR | R10 |
@@ -688,7 +726,7 @@ Todo con `IOSTANDARD LVCMOS33`. El XDC está en
 
 ---
 
-## 15. Polaridades y cosas por verificar
+## 15. Polaridades y verificaciones
 
 Las polaridades salen del manual de referencia de la Nexys 4:
 
@@ -713,33 +751,41 @@ parameter logic AN_ACTIVE_LEVEL  = 1'b0;
 La polaridad invertida de CPU_RESET confirma que hay que dejarlo en paz: nuestro
 reset es `btnC`, que es activo en alto como los demás pulsadores.
 
-### La salida de audio no está resuelta
+### La salida de audio
 
 El manual de la Nexys 4 documenta `AUD_PWM` en A11 como entrada del filtro paso
-bajo, pero **no menciona `AUD_SD` en ninguna parte**, aunque el pin aparezca en
-el XDC de Digilent. Tampoco lo documenta el manual de la Nexys 4 DDR.
+bajo, pero no menciona `AUD_SD` en ninguna parte, aunque el pin aparezca en el
+XDC de Digilent. Tampoco lo documenta el manual de la Nexys 4 DDR. Y el de la
+DDR describe la entrada del filtro como colector abierto, "the signal needs to
+be driven low for logic '0' and left in high-impedance for logic '1'". Si acá
+pasara lo mismo, `aud_pwm_o` no podría ser una salida normal y habría que
+declararla como triestado.
 
-Y hay un detalle que puede hacer que no suene nada: el manual de la DDR describe
-la entrada del filtro como colector abierto, "the signal needs to be driven low
-for logic '0' and left in high-impedance for logic '1'". Si en nuestra tarjeta
-pasa lo mismo, `aud_pwm_o` no puede ser una salida normal: habría que declararla
-como triestado, poniendo `0` o alta impedancia en vez de `0` o `1`.
+En la tarjeta resultó que sí funciona como salida normal. Con `aud_pwm_o` puesto
+como salida corriente y `aud_sd_o` fijo en alto, los tonos del juego se oyen sin
+problema por el jack de audio. Eso cierra las dos dudas en la práctica, aunque el
+manual siga sin documentar `AUD_SD`: no hizo falta triestado ni el plan B del
+Pmod buzzer en la fila de arriba de JB.
 
-Las dos cosas hay que mirarlas en el esquemático de la tarjeta antes de escribir
-el `buzzer_controller`. Si el tema se complica, el plan B del Pmod buzzer en
-la fila de arriba de JB lo resuelve sin depender de nada de esto.
+Lo que sigue sin comprobarse es si el volumen alcanza en el aula, porque eso
+depende del parlante que se use en la presentación.
 
-### Lo demás pendiente
+### Cómo se cerraron las dudas
 
-| Qué | Por qué | Cómo se cierra |
+Cuando escribimos esta sección había varias cosas que no podíamos resolver leyendo
+manuales. Estas se cerraron en la tarjeta:
+
+| Qué | Por qué estaba abierta | Cómo se cerró |
 |---|---|---|
-| Interfaz del núcleo UART | todavía no lo tenemos | capa de adaptación + prueba de contraste al recibirlo |
-| Trama del núcleo: paridad, bits de parada | depende del núcleo | al recibirlo |
-| Ancho de `E` y setup/hold del LCD | el manual del PmodCLP no los da | validación en la tarjeta |
-| Función y polaridad de `AUD_SD` | no aparece en el manual | esquemático de la tarjeta |
-| Si `AUD_PWM` es colector abierto | el manual de la DDR dice que sí | esquemático de la tarjeta |
-| Conexión del PmodCLP a JA y JB | deducida del pinout | comprobar antes de la primera prueba |
-| Que el audio se oiga en el aula | depende del parlante | probarlo antes de la presentación |
+| Interfaz del núcleo UART | todavía no lo teníamos | al recibirlo: capa de adaptación y prueba de contraste con el bloque de pruebas |
+| Trama del núcleo: paridad, bits de parada | dependía del núcleo | al recibirlo, mirando su código |
+| Ancho de `E` y setup/hold del LCD | el manual del PmodCLP no los da | el LCD escribe bien con los valores elegidos |
+| Función y polaridad de `AUD_SD` | no aparece en el manual | fijo en alto: el amplificador suena |
+| Si `AUD_PWM` es colector abierto | el manual de la DDR dice que sí | acá funciona como salida normal, sin triestado |
+| Conexión del PmodCLP a JA y JB | deducida del pinout | montando la tarjeta; el J2 solo alcanza la fila de abajo del JB |
+
+La única que sigue abierta es si el volumen alcanza en el aula, porque depende del
+parlante que haya en la presentación.
 
 ---
 
@@ -788,6 +834,12 @@ dos caracteres de cada una de las seis pantallas, carácter por carácter, y por
 tanto ejercita los tres de punta a punta. Dos de ellos son combinacionales puros
 y el tercero es un banco de registros con una sola condición de carga, así que un
 testbench propio repetiría lo que la prueba de nivel superior ya comprueba.
+
+Lo mismo vale para los dos módulos en que se partió la capa de protocolo,
+`uart_msg_snapshot` y `uart_msg_char_gen`. Los cubre `tb_uart_msg`, que se engancha
+a la línea serie y decodifica la trama bit a bit, así que compara la cadena de
+texto que sale por el cable. Si el generador pusiera un carácter equivocado en
+cualquier posición, esa comparación lo ve.
 
 Al hacer ese reparto se comprobó además, con un `miter` y un solver SAT, que la
 versión nueva de `lcd_screen_ctrl` y la anterior responden igual: no existe
@@ -924,10 +976,15 @@ cuenten siempre lo mismo.
 ### Resultado
 
 El sistema completo funciona sobre la tarjeta: se juega desde la terminal de
-Python y el LCD, los displays y los LEDs acompañan. Con eso queda comprobada en
-hardware la integración con el núcleo UART en VHDL, que es la parte que los
-testbenches del protocolo no cubren, porque ahí el otro extremo de la línea es
-un modelo de comportamiento y no el núcleo real.
+Python y el LCD, los displays, los LEDs y el sonido acompañan. Con eso queda
+comprobada en hardware la integración con el núcleo UART en VHDL, que es la parte
+que los testbenches del protocolo no cubren, porque ahí el otro extremo de la
+línea es un modelo de comportamiento y no el núcleo real.
+
+El audio también quedó resuelto acá. Los tonos se oyen por el jack de 3.5 mm con
+`aud_pwm_o` declarado como salida normal y `aud_sd_o` fijo en alto, así que no
+hizo falta ni la salida triestado ni el Pmod buzzer de reserva que habíamos
+previsto por si acaso.
 
 Las fotografías de las tres pantallas, la captura de una partida en la terminal y
 la del montaje están en `DOCUMENTATION/FIGURAS`.
